@@ -35,21 +35,30 @@ const AppData = mongoose.model('AppData', new mongoose.Schema({
 }));
 
 // ==========================================
-// 📢 ระบบส่งแจ้งเตือน Telegram
+// 📢 ระบบส่งแจ้งเตือน Telegram (อัปเดตระบบป้องกันช่องว่าง)
 // ==========================================
 const sendTelegramNotify = async (message) => {
-  // ดึง Token จากต้นฉบับของคุณ
-  const token = process.env.TELEGRAM_BOT_TOKEN || "8727691071:AAFI2lvvv5BIwuVa-qpqxFMRiGFGXHFGWPY";
-  const chatId = process.env.TELEGRAM_CHAT_ID || "-5311910671";
+  // ใช้ .trim() เพื่อตัดช่องว่างหรือบรรทัดใหม่ที่เผลอก๊อปปี้ติดมาออกอัตโนมัติ
+  const token = (process.env.TELEGRAM_BOT_TOKEN || "8727691071:AAFI2lvvv5BIwuVa-qpqxFMRiGFGXHFGWPY").trim();
+  const chatId = (process.env.TELEGRAM_CHAT_ID || "-5311910671").trim();
   
   if (!token || !chatId || token.includes('ใส่_')) return; 
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' })
     });
-  } catch (error) { console.error('❌ ส่ง Telegram ไม่สำเร็จ:', error.message); }
+
+    // เพิ่มการเช็คสถานะการส่ง หากส่งไม่ผ่านจะแสดงสาเหตุที่แท้จริงใน Logs
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ Telegram API Error: ${response.status} - ${errorText}`);
+    }
+  } catch (error) { 
+    console.error('❌ ส่ง Telegram ไม่สำเร็จ:', error.message); 
+  }
 };
 
 // ==========================================
