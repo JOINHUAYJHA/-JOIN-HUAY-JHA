@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const cron = require('node-cron'); // 🟢 เพิ่มโมดูลตั้งเวลาอัตโนมัติ
 
 const app = express();
 app.use(cors());
@@ -15,7 +16,7 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch(err => console.error('❌ เชื่อมต่อ MongoDB ล้มเหลว:', err));
 
 // ==========================================
-// 📢 ระบบส่งแจ้งเตือน Telegram (ต้องประกาศก่อนถึงจะเรียกใช้ได้)
+// 📢 ระบบส่งแจ้งเตือน Telegram
 // ==========================================
 const sendTelegramNotify = async (message) => {
   const token = (process.env.TELEGRAM_BOT_TOKEN || "8727691071:AAFI2lvvv5BIwuVa-qpqxFMRiGFGXHFGWPY").trim();
@@ -74,10 +75,21 @@ const appDataSchema = new mongoose.Schema({
     value: { type: mongoose.Schema.Types.Mixed, required: true }
 });
 
+// 🟢 โครงสร้างฐานข้อมูล ตารางจับผิดการทุจริต (Audit Log)
+const auditLogSchema = new mongoose.Schema({
+    action: { type: String, required: true },
+    billId: { type: String, required: true },
+    details: { type: String }, 
+    deviceInfo: { type: String },
+    location: { type: String },
+    timestamp: { type: Date, default: Date.now }
+});
+
 // ประกาศใช้งาน Model 
 const Bill = mongoose.model('Bill', billSchema);
 const ArchiveBill = mongoose.model('ArchiveBill', billSchema); 
 const AppData = mongoose.model('AppData', appDataSchema);
+const AuditLog = mongoose.model('AuditLog', auditLogSchema); // 🟢 ใช้งาน Audit Log
 
 // ==========================================
 // 🚀 API ROUTES (เส้นทางข้อมูลต่างๆ)
@@ -129,7 +141,8 @@ app.post('/api/appdata', checkAuth, async (req, res) => {
 // --- ระบบจัดการบิล (GET, POST, PUT, DELETE) ---
 app.get('/api/bills', checkAuth, async (req, res) => {
   try {
-    const bills = await Bill.find().sort({ createdAt: -1 });
+    // 🟢 ดึงข้อมูลทีละ 1000 รายการล่าสุด ป้องกันเซิร์ฟเวอร์ค้างเมื่อบิลเยอะ
+    const bills = await Bill.find().sort({ createdAt: -1 }).limit(1000);
     let flatData = [];
     bills.forEach(b => {
       b.items.forEach(i => {
@@ -200,6 +213,14 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
 
     await Bill.findOneAndUpdate({ billId: targetBillId }, { customerName: cName, items: validItems, totalAmount: newTotal });
 
+    // 🟢 บันทึก Audit Log แอบจดว่ามีการแก้ไขบิล
+    await new AuditLog({
+        action: 'EDIT_BILL',
+        billId: targetBillId,
+        details: `แก้ไขเป็น ${validItems.length} รายการ | ยอดใหม่: ${newTotal} ฿`,
+        deviceInfo, location
+    }).save();
+
     let editMsg = `✏️ <b>แจ้งเตือน: มีการแก้ไขบิล!</b>\n👤 ลูกค้า: ${cName}\n🏷️ รหัสบิล: ${targetBillId}\n💰 ยอดใหม่หลังแก้: ${newTotal.toLocaleString()} ฿\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`;
     sendTelegramNotify(editMsg);
 
@@ -215,6 +236,14 @@ app.delete('/api/bills/:billId', checkAuth, async (req, res) => {
 
     const bill = await Bill.findOneAndDelete({ billId: targetBillId });
     if (bill) {
+      // 🟢 บันทึก Audit Log แอบจดว่ามีการลบบิล
+      await new AuditLog({
+          action: 'DELETE_BILL',
+          billId: targetBillId,
+          details: `ลบ ${bill.items.length} รายการ มูลค่า ${bill.totalAmount} ฿`,
+          deviceInfo, location
+      }).save();
+
       sendTelegramNotify(`🗑️ <b>แจ้งเตือน: มีการลบบิล!</b>\n🏷️ รหัสบิล: ${targetBillId}\n❌ ลบออกไป ${bill.items.length} รายการ\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
       res.json({ status: 'success', message: 'ลบสำเร็จ' });
     } else {
@@ -310,6 +339,43 @@ app.post('/api/migrate', checkAuth, async (req, res) => {
     res.json({ status: 'success', message: `ดึงข้อมูลเสร็จสิ้น! นำเข้าบิลเก่าจำนวน ${count} บิล` });
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
+
+
+// ==========================================
+// 🤖 ระบบหุ่นยนต์ทำงานอัตโนมัติ (Cron Jobs)
+// ==========================================
+// สั่งให้เซิร์ฟเวอร์สรุปยอดส่งเข้า Telegram ทุกคืนเวลา 23:59 น.
+cron.schedule('59 23 * * *', async () => {
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // เริ่มนับตั้งแต่เที่ยงคืนของวันนี้
+        
+        // ดึงเฉพาะบิลที่เกิดขึ้นในวันนี้
+        const billsToday = await Bill.find({ createdAt: { $gte: today } });
+        
+        let totalSales = 0;
+        let totalItems = 0;
+        
+        billsToday.forEach(b => {
+            totalSales += b.totalAmount;
+            totalItems += b.items.length;
+        });
+
+        if (billsToday.length > 0) {
+            let msg = `📊 <b>สรุปยอดขายประจำวัน!</b> 📊\n`;
+            msg += `📅 วันที่: ${new Date().toLocaleDateString('th-TH')}\n`;
+            msg += `🧾 จำนวนบิล: ${billsToday.length} บิล\n`;
+            msg += `📝 จำนวนรายการ: ${totalItems} รายการ\n`;
+            msg += `💰 <b>ยอดขายรวม: ${totalSales.toLocaleString()} บาท</b>\n`;
+            msg += `✅ พักผ่อนได้เลยครับ บอทสรุปยอดให้แล้ว!`;
+            
+            sendTelegramNotify(msg);
+        }
+    } catch (error) {
+        console.error("Cron Job Error:", error);
+    }
+});
+
 
 // ==========================================
 // 🚀 เริ่มต้นการทำงานของเซิร์ฟเวอร์
