@@ -30,6 +30,52 @@ const billSchema = new mongoose.Schema({
 
 const Bill = mongoose.model('Bill', billSchema);
 const ArchiveBill = mongoose.model('ArchiveBill', billSchema); 
+// ==========================================
+// 🗄️ โครงสร้างฐานข้อมูลสำหรับเก็บตั้งค่า, เลขอั้น, และผลตรวจรางวัล
+// ==========================================
+const appDataSchema = new mongoose.Schema({
+    key: { type: String, required: true, unique: true }, // ชื่อกล่องข้อมูล เช่น 'winnersData', 'rates', 'limits'
+    value: { type: mongoose.Schema.Types.Mixed, required: true } // ข้อมูลข้างใน
+});
+const AppData = mongoose.model('AppData', appDataSchema);
+
+// ==========================================
+// 🔄 API สำหรับ ดึง/อัปเดต ข้อมูลตั้งค่าและผลรางวัล (Sync)
+// ==========================================
+
+// 1. ดึงข้อมูลทั้งหมดไปแสดงผล (GET)
+app.get('/api/appdata', checkAuth, async (req, res) => {
+    try {
+        const allData = await AppData.find();
+        const dataObj = {};
+        allData.forEach(item => {
+            dataObj[item.key] = item.value; // แปลงข้อมูลให้อยู่ในรูปแบบที่หน้าเว็บอ่านง่าย
+        });
+        res.json({ status: 'success', data: dataObj });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+// 2. บันทึกข้อมูลที่ซิงค์มาจากหน้าเว็บ (POST)
+app.post('/api/appdata', checkAuth, async (req, res) => {
+    try {
+        const { key, value } = req.body;
+        if (!key) return res.status(400).json({ status: 'error', message: 'กรุณาระบุชื่อคีย์' });
+
+        // ค้นหาคีย์เดิม ถ้ามีให้อัปเดตข้อมูลทับ ถ้าไม่มีให้สร้างใหม่ (upsert)
+        await AppData.findOneAndUpdate(
+            { key: key },
+            { value: value },
+            { upsert: true, new: true }
+        );
+        res.json({ status: 'success', message: 'ซิงค์ข้อมูลขึ้นเซิร์ฟเวอร์สำเร็จ' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
 
 const AppData = mongoose.model('AppData', new mongoose.Schema({
   key: { type: String, required: true, unique: true },
