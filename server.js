@@ -27,7 +27,7 @@ const billSchema = new mongoose.Schema({
 });
 
 const Bill = mongoose.model('Bill', billSchema);
-const ArchiveBill = mongoose.model('ArchiveBill', billSchema); // สำหรับเก็บประวัติบิลเก่า (เหมือน Archive_History)
+const ArchiveBill = mongoose.model('ArchiveBill', billSchema); 
 
 const AppData = mongoose.model('AppData', new mongoose.Schema({
   key: { type: String, required: true, unique: true },
@@ -35,10 +35,9 @@ const AppData = mongoose.model('AppData', new mongoose.Schema({
 }));
 
 // ==========================================
-// 📢 ระบบส่งแจ้งเตือน Telegram (อัปเดตระบบป้องกันช่องว่าง)
+// 📢 ระบบส่งแจ้งเตือน Telegram
 // ==========================================
 const sendTelegramNotify = async (message) => {
-  // ใช้ .trim() เพื่อตัดช่องว่างหรือบรรทัดใหม่ที่เผลอก๊อปปี้ติดมาออกอัตโนมัติ
   const token = (process.env.TELEGRAM_BOT_TOKEN || "8727691071:AAFI2lvvv5BIwuVa-qpqxFMRiGFGXHFGWPY").trim();
   const chatId = (process.env.TELEGRAM_CHAT_ID || "-5311910671").trim();
   
@@ -50,8 +49,6 @@ const sendTelegramNotify = async (message) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' })
     });
-
-    // เพิ่มการเช็คสถานะการส่ง หากส่งไม่ผ่านจะแสดงสาเหตุที่แท้จริงใน Logs
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`❌ Telegram API Error: ${response.status} - ${errorText}`);
@@ -89,10 +86,8 @@ const checkAuth = (req, res, next) => {
 };
 
 // ==========================================
-// 🧾 ระบบจัดการบิล (เหมือนใน doGet/doPost)
+// 🧾 ระบบจัดการบิล
 // ==========================================
-
-// โหลดข้อมูลบิล
 app.get('/api/bills', checkAuth, async (req, res) => {
   try {
     const bills = await Bill.find().sort({ createdAt: -1 });
@@ -109,7 +104,6 @@ app.get('/api/bills', checkAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// สร้างบิลใหม่
 app.post('/api/bills', checkAuth, async (req, res) => {
   try {
     const { customerName, items, timestamp, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
@@ -147,7 +141,6 @@ app.post('/api/bills', checkAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// แก้ไขบิล
 app.put('/api/bills/:billId', checkAuth, async (req, res) => {
   try {
     const targetBillId = req.params.billId;
@@ -175,7 +168,6 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// ลบบิล
 app.delete('/api/bills/:billId', checkAuth, async (req, res) => {
   try {
     const targetBillId = req.params.billId;
@@ -192,12 +184,10 @@ app.delete('/api/bills/:billId', checkAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// ตัดรอบงวด
 app.post('/api/archive', checkAuth, async (req, res) => {
   try {
     const bills = await Bill.find();
     if (bills.length > 0) {
-      // โอนย้ายข้อมูลไปเก็บใน Collection ArchiveBill (เหมือนไปชีต Archive_History)
       await ArchiveBill.insertMany(bills);
       await Bill.deleteMany({});
       
@@ -213,7 +203,81 @@ app.post('/api/archive', checkAuth, async (req, res) => {
 });
 
 // ==========================================
-// ⚙️ ระบบตั้งค่า และผลรางวัล (เหมือน get_settings / get_prize_data)
+// 🚚 ระบบดูดข้อมูลจาก Google Sheets (Migration)
+// ==========================================
+app.post('/api/migrate', checkAuth, async (req, res) => {
+  try {
+    const { googleSheetUrl } = req.body;
+    if (!googleSheetUrl) throw new Error('ไม่ได้ระบุ URL ของ Google Sheets');
+
+    const response = await fetch(googleSheetUrl);
+    const result = await response.json();
+    
+    if (result.status !== 'success' || !result.data) {
+      throw new Error('ดึงข้อมูลจาก Sheets ไม่สำเร็จ หรือชีตว่างเปล่า');
+    }
+
+    const rawData = result.data;
+    let groupedBills = {};
+
+    // 1. จัดกลุ่มข้อมูลแถวแบนๆ ให้รวมกันเป็นบิล
+    rawData.forEach(item => {
+      let bId = item.billId || 'B-OLD-' + Math.floor(1000 + Math.random() * 9000);
+      if (!groupedBills[bId]) {
+        groupedBills[bId] = {
+          billId: bId,
+          customerName: item.customer || 'ลูกค้าทั่วไป',
+          timestamp: item.timestamp ? new Date(item.timestamp) : new Date(),
+          totalAmount: 0,
+          items: []
+        };
+      }
+      let p = parseFloat(item.price);
+      if (!isNaN(p) && p > 0) {
+        groupedBills[bId].totalAmount += p;
+        groupedBills[bId].items.push({
+          category: item.category || 'ข้อมูลบิลทั่วไป',
+          type: item.type,
+          number: String(item.number).replace(/^'/, '').trim(),
+          price: p,
+          memo: item.memo || '-'
+        });
+      }
+    });
+
+    // 2. ทยอยบันทึกลง MongoDB
+    let count = 0;
+    for (let key in groupedBills) {
+      const billData = groupedBills[key];
+      // ตรวจสอบว่าเคยดูดบิลรหัสนี้มาแล้วหรือยัง จะได้ไม่ซ้ำ
+      const exist = await Bill.findOne({ billId: billData.billId });
+      const existArchived = await ArchiveBill.findOne({ billId: billData.billId });
+      
+      if (!exist && !existArchived) {
+        const newBill = new Bill({
+          billId: billData.billId,
+          customerName: billData.customerName,
+          totalAmount: billData.totalAmount,
+          items: billData.items,
+          createdAt: billData.timestamp
+        });
+        await newBill.save();
+        count++;
+      }
+    }
+
+    if (count > 0) {
+        sendTelegramNotify(`🚚 <b>ย้ายฐานข้อมูลสำเร็จ!</b>\nดูดบิลเก่าจาก Google Sheets เข้าสู่ระบบจำนวน ${count} บิลเรียบร้อยแล้ว 🎉`);
+    }
+
+    res.json({ status: 'success', message: `ดึงข้อมูลเสร็จสิ้น! นำเข้าบิลเก่าจำนวน ${count} บิล` });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+// ==========================================
+// ⚙️ ระบบตั้งค่า และผลรางวัล
 // ==========================================
 app.get('/api/appdata', checkAuth, async (req, res) => {
   try {
