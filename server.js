@@ -15,75 +15,7 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch(err => console.error('❌ เชื่อมต่อ MongoDB ล้มเหลว:', err));
 
 // ==========================================
-// 📦 โครงสร้างฐานข้อมูล (Database Models)
-// ==========================================
-const itemSchema = new mongoose.Schema({
-  category: String, type: String, number: String, price: Number, memo: String
-});
-const billSchema = new mongoose.Schema({
-  billId: { type: String, required: true, unique: true },
-  customerName: { type: String, default: 'ลูกค้าทั่วไป' },
-  totalAmount: { type: Number, required: true },
-  items: [itemSchema],
-  createdAt: { type: Date, default: Date.now }
-});
-
-const Bill = mongoose.model('Bill', billSchema);
-const ArchiveBill = mongoose.model('ArchiveBill', billSchema); 
-// ==========================================
-// 🗄️ โครงสร้างฐานข้อมูลสำหรับเก็บตั้งค่า, เลขอั้น, และผลตรวจรางวัล
-// ==========================================
-const appDataSchema = new mongoose.Schema({
-    key: { type: String, required: true, unique: true }, // ชื่อกล่องข้อมูล เช่น 'winnersData', 'rates', 'limits'
-    value: { type: mongoose.Schema.Types.Mixed, required: true } // ข้อมูลข้างใน
-});
-const AppData = mongoose.model('AppData', appDataSchema);
-
-// ==========================================
-// 🔄 API สำหรับ ดึง/อัปเดต ข้อมูลตั้งค่าและผลรางวัล (Sync)
-// ==========================================
-
-// 1. ดึงข้อมูลทั้งหมดไปแสดงผล (GET)
-app.get('/api/appdata', checkAuth, async (req, res) => {
-    try {
-        const allData = await AppData.find();
-        const dataObj = {};
-        allData.forEach(item => {
-            dataObj[item.key] = item.value; // แปลงข้อมูลให้อยู่ในรูปแบบที่หน้าเว็บอ่านง่าย
-        });
-        res.json({ status: 'success', data: dataObj });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ status: 'error', message: error.message });
-    }
-});
-
-// 2. บันทึกข้อมูลที่ซิงค์มาจากหน้าเว็บ (POST)
-app.post('/api/appdata', checkAuth, async (req, res) => {
-    try {
-        const { key, value } = req.body;
-        if (!key) return res.status(400).json({ status: 'error', message: 'กรุณาระบุชื่อคีย์' });
-
-        // ค้นหาคีย์เดิม ถ้ามีให้อัปเดตข้อมูลทับ ถ้าไม่มีให้สร้างใหม่ (upsert)
-        await AppData.findOneAndUpdate(
-            { key: key },
-            { value: value },
-            { upsert: true, new: true }
-        );
-        res.json({ status: 'success', message: 'ซิงค์ข้อมูลขึ้นเซิร์ฟเวอร์สำเร็จ' });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ status: 'error', message: error.message });
-    }
-});
-
-const AppData = mongoose.model('AppData', new mongoose.Schema({
-  key: { type: String, required: true, unique: true },
-  value: { type: mongoose.Schema.Types.Mixed, required: true }
-}));
-
-// ==========================================
-// 📢 ระบบส่งแจ้งเตือน Telegram
+// 📢 ระบบส่งแจ้งเตือน Telegram (ต้องประกาศก่อนถึงจะเรียกใช้ได้)
 // ==========================================
 const sendTelegramNotify = async (message) => {
   const token = (process.env.TELEGRAM_BOT_TOKEN || "8727691071:AAFI2lvvv5BIwuVa-qpqxFMRiGFGXHFGWPY").trim();
@@ -107,18 +39,8 @@ const sendTelegramNotify = async (message) => {
 };
 
 // ==========================================
-// 🔐 ระบบยืนยันตัวตน (Authentication)
+// 🔐 ระบบยืนยันตัวตน (Authentication Middleware)
 // ==========================================
-app.post('/api/verify_pin', (req, res) => {
-  const { pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
-  if (pin === process.env.ADMIN_PIN) {
-    res.json({ status: 'success', message: 'Login successful' });
-  } else {
-    sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามล็อกอินแต่ <b>ใส่ PIN ผิด</b>\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
-    res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
-  }
-});
-
 const checkAuth = (req, res, next) => {
   const pin = req.headers['authorization'];
   if (pin === process.env.ADMIN_PIN) {
@@ -134,8 +56,77 @@ const checkAuth = (req, res, next) => {
 };
 
 // ==========================================
-// 🧾 ระบบจัดการบิล (GET, POST, PUT, DELETE)
+// 📦 โครงสร้างฐานข้อมูล (Database Models)
 // ==========================================
+const itemSchema = new mongoose.Schema({
+  category: String, type: String, number: String, price: Number, memo: String
+});
+const billSchema = new mongoose.Schema({
+  billId: { type: String, required: true, unique: true },
+  customerName: { type: String, default: 'ลูกค้าทั่วไป' },
+  totalAmount: { type: Number, required: true },
+  items: [itemSchema],
+  createdAt: { type: Date, default: Date.now }
+});
+
+const appDataSchema = new mongoose.Schema({
+    key: { type: String, required: true, unique: true },
+    value: { type: mongoose.Schema.Types.Mixed, required: true }
+});
+
+// ประกาศใช้งาน Model 
+const Bill = mongoose.model('Bill', billSchema);
+const ArchiveBill = mongoose.model('ArchiveBill', billSchema); 
+const AppData = mongoose.model('AppData', appDataSchema);
+
+// ==========================================
+// 🚀 API ROUTES (เส้นทางข้อมูลต่างๆ)
+// ==========================================
+
+// --- ตรวจสอบรหัส PIN ---
+app.post('/api/verify_pin', (req, res) => {
+  const { pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
+  if (pin === process.env.ADMIN_PIN) {
+    res.json({ status: 'success', message: 'Login successful' });
+  } else {
+    sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามล็อกอินแต่ <b>ใส่ PIN ผิด</b>\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
+    res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
+  }
+});
+
+// --- ดึง/อัปเดต ข้อมูลตั้งค่า เรตจ่าย เลขอั้น ผลรางวัล (Sync) ---
+app.get('/api/appdata', checkAuth, async (req, res) => {
+    try {
+        const allData = await AppData.find();
+        const dataObj = {};
+        allData.forEach(item => {
+            dataObj[item.key] = item.value;
+        });
+        res.json({ status: 'success', data: dataObj });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+app.post('/api/appdata', checkAuth, async (req, res) => {
+    try {
+        const { key, value } = req.body;
+        if (!key) return res.status(400).json({ status: 'error', message: 'กรุณาระบุชื่อคีย์' });
+
+        await AppData.findOneAndUpdate(
+            { key: key },
+            { value: value },
+            { upsert: true, new: true }
+        );
+        res.json({ status: 'success', message: 'ซิงค์ข้อมูลขึ้นเซิร์ฟเวอร์สำเร็จ' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+// --- ระบบจัดการบิล (GET, POST, PUT, DELETE) ---
 app.get('/api/bills', checkAuth, async (req, res) => {
   try {
     const bills = await Bill.find().sort({ createdAt: -1 });
@@ -232,9 +223,7 @@ app.delete('/api/bills/:billId', checkAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// ==========================================
-// 📦 ระบบตัดรอบ (Archive)
-// ==========================================
+// --- ระบบตัดรอบ (Archive) ---
 app.post('/api/archive', checkAuth, async (req, res) => {
   try {
     const bills = await Bill.find();
@@ -245,54 +234,39 @@ app.post('/api/archive', checkAuth, async (req, res) => {
       let itemCount = 0;
       bills.forEach(b => itemCount += b.items.length);
 
-      sendTelegramNotify(`⚠️ <b>แจ้งเตือนระบบ</b>\n\nตัดรอบสำเร็จ โอนย้าย ${itemCount} รายการเข้าเก็บใน Archive_History เรียบร้อยแล้ว`);
-      res.json({ status: 'success', message: `ตัดรอบสำเร็จ โอนย้าย ${itemCount} รายการเข้าเก็บใน Archive_History เรียบร้อยแล้ว` });
+      sendTelegramNotify(`⚠️ <b>แจ้งเตือนระบบ</b>\n\nตัดรอบสำเร็จ โอนย้าย ${itemCount} รายการเข้าเก็บใน Archive เรียบร้อยแล้ว`);
+      res.json({ status: 'success', message: `ตัดรอบสำเร็จ โอนย้าย ${itemCount} รายการเข้าเก็บเรียบร้อย` });
     } else {
       res.json({ status: 'error', message: 'ไม่มีข้อมูลบิลใหม่ให้ตัดรอบ' });
     }
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// ==========================================
-// 🚚 ระบบดูดข้อมูลจาก Google Sheets (Migration)
-// ==========================================
+// --- ระบบดูดข้อมูลจาก Google Sheets (Migration) ---
 app.post('/api/migrate', checkAuth, async (req, res) => {
   try {
     const { googleSheetUrl } = req.body;
     if (!googleSheetUrl) throw new Error('ไม่ได้ระบุ URL ของ Google Sheets');
 
     const response = await fetch(googleSheetUrl);
-    
-    // ลองอ่านข้อมูลดิบก่อน เพื่อดูรูปแบบโครงสร้าง
     const textData = await response.text();
     let result;
     try {
         result = JSON.parse(textData);
     } catch (e) {
-        throw new Error('ลิงก์ Google Sheets ไม่ได้ส่งข้อมูลออกมาเป็น JSON (อาจจะต้องเพิ่มคำสั่ง เช่น ?action=getBills ต่อท้ายลิงก์ครับ)');
+        throw new Error('ลิงก์ Google Sheets ไม่ได้ส่งข้อมูลออกมาเป็น JSON');
     }
     
-    // ค้นหาข้อมูลจากทุกรูปแบบที่เป็นไปได้
     let rawData = [];
-    if (Array.isArray(result)) {
-        rawData = result; 
-    } else if (result.data && Array.isArray(result.data)) {
-        rawData = result.data; 
-    } else if (result.items && Array.isArray(result.items)) {
-        rawData = result.items; 
-    } else if (result.result && Array.isArray(result.result)) {
-        rawData = result.result; 
-    } else {
-        throw new Error('ไม่พบโครงสร้างตารางข้อมูลในลิงก์นี้ครับ');
-    }
+    if (Array.isArray(result)) rawData = result; 
+    else if (result.data && Array.isArray(result.data)) rawData = result.data; 
+    else if (result.items && Array.isArray(result.items)) rawData = result.items; 
+    else if (result.result && Array.isArray(result.result)) rawData = result.result; 
+    else throw new Error('ไม่พบโครงสร้างตารางข้อมูลในลิงก์นี้ครับ');
 
-    if (rawData.length === 0) {
-      throw new Error('เชื่อมต่อสำเร็จ แต่ไม่พบรายการบิลเลยครับ (ชีตอาจจะว่างเปล่า)');
-    }
+    if (rawData.length === 0) throw new Error('ไม่พบรายการบิลเลยครับ (ชีตอาจจะว่างเปล่า)');
 
     let groupedBills = {};
-
-    // 1. จัดกลุ่มข้อมูลแถวให้รวมกันเป็นบิล
     rawData.forEach(item => {
       let bId = item.billId || item.id || 'B-OLD-' + Math.floor(1000 + Math.random() * 9000);
       if (!groupedBills[bId]) {
@@ -317,7 +291,6 @@ app.post('/api/migrate', checkAuth, async (req, res) => {
       }
     });
 
-    // 2. ทยอยบันทึกลง MongoDB
     let count = 0;
     for (let key in groupedBills) {
       const billData = groupedBills[key];
@@ -326,47 +299,20 @@ app.post('/api/migrate', checkAuth, async (req, res) => {
       
       if (!exist && !existArchived) {
         const newBill = new Bill({
-          billId: billData.billId,
-          customerName: billData.customerName,
-          totalAmount: billData.totalAmount,
-          items: billData.items,
-          createdAt: billData.timestamp
+          billId: billData.billId, customerName: billData.customerName, totalAmount: billData.totalAmount, items: billData.items, createdAt: billData.timestamp
         });
         await newBill.save();
         count++;
       }
     }
 
-    if (count > 0) {
-        sendTelegramNotify(`🚚 <b>ย้ายฐานข้อมูลสำเร็จ!</b>\nดูดบิลเก่าจาก Google Sheets เข้าสู่ระบบจำนวน ${count} บิลเรียบร้อยแล้ว 🎉`);
-    }
-
+    if (count > 0) sendTelegramNotify(`🚚 <b>ย้ายฐานข้อมูลสำเร็จ!</b>\nดูดบิลเก่าจำนวน ${count} บิลเรียบร้อย 🎉`);
     res.json({ status: 'success', message: `ดึงข้อมูลเสร็จสิ้น! นำเข้าบิลเก่าจำนวน ${count} บิล` });
-  } catch (error) {
-    res.status(500).json({ status: 'error', message: error.message });
-  }
+  } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
 // ==========================================
-// ⚙️ ระบบตั้งค่า และผลรางวัล (AppData)
+// 🚀 เริ่มต้นการทำงานของเซิร์ฟเวอร์
 // ==========================================
-app.get('/api/appdata', checkAuth, async (req, res) => {
-  try {
-    const data = await AppData.find();
-    let result = {};
-    data.forEach(d => result[d.key] = d.value);
-    res.json({ status: 'success', data: result });
-  } catch (error) { res.status(500).json({ status: 'error' }); }
-});
-
-app.post('/api/appdata', checkAuth, async (req, res) => {
-  try {
-    const { key, value } = req.body;
-    await AppData.findOneAndUpdate({ key: key }, { value: value }, { upsert: true });
-    res.json({ status: 'success' });
-  } catch (error) { res.status(500).json({ status: 'error' }); }
-});
-
-// เริ่มเซิร์ฟเวอร์
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server เปิดรันอยู่ที่พอร์ต ${PORT}`));
