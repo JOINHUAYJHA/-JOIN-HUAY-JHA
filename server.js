@@ -300,32 +300,8 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
         generationConfig: { responseMimeType: "application/json" }
     });
 
-    const prompt = `วิเคราะห์รูปภาพโพยหวย และแปลงเป็น JSON Array เท่านั้น โครงสร้าง: [{"type": "รูปแบบ", "number": "เลข", "price": ราคา}]
-    - type ให้เลือกจาก: "3 บน", "3 โต๊ด", "2 บน", "2 ล่าง", "วิ่งบน", "วิ่งล่าง"
-    - ถ้าเจอคำว่า "บล" หรือ "x" ให้แยกเป็น 2 รายการ (เช่น 2 บน และ 2 ล่าง)
-    - price ต้องเป็นตัวเลขเท่านั้น (Number)
-    ห้ามใส่ข้อความอธิบายใดๆ นอกเหนือจาก JSON Array`;
-
-    // 🟢 2. ส่งประเภทรูปภาพที่ถูกต้องไปให้ AI
-    const imageParts = [
-      { inlineData: { data: base64Data, mimeType: mimeType } }
-    ];
-
-    const result = await model.generateContent([prompt, ...imageParts]);
-    const responseText = result.response.text();
-    
-    const cleanJsonText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsedData = JSON.parse(cleanJsonText);
-
-    res.json({ status: 'success', data: parsedData });
-  } catch (error) {
-    // 🟢 3. พิมพ์ Error ลง Logs เพื่อให้เราเห็นสาเหตุที่แท้จริง
-    console.error("OCR Error:", error);
-    res.status(500).json({ status: 'error', message: error.message || 'AI ไม่สามารถอ่านข้อมูลได้' });
-  }
-});
-    // คำสั่งที่สอนให้ AI เข้าใจโพยหวย
-   const prompt = `วิเคราะห์รูปภาพโพยหวยที่เขียนด้วยลายมือ และแปลงเป็น JSON Array เท่านั้น โครงสร้าง: [{"type": "รูปแบบ", "number": "เลข", "price": ราคา}]
+    // 🟢 2. คำสั่งที่สอนให้ AI เข้าใจโพยหวย (อัปเดตรองรับการเขียนแบบ 2x2, 5x5)
+    const prompt = `วิเคราะห์รูปภาพโพยหวยที่เขียนด้วยลายมือ และแปลงเป็น JSON Array เท่านั้น โครงสร้าง: [{"type": "รูปแบบ", "number": "เลข", "price": ราคา}]
     
     กฎการวิเคราะห์โพย:
     1. type ให้เลือกจาก: "3 บน", "3 โต๊ด", "2 บน", "2 ล่าง", "วิ่งบน", "วิ่งล่าง"
@@ -337,8 +313,9 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
        
     ห้ามอธิบายความ ห้ามมีข้อความอื่นใดๆ ตอบกลับมาแค่ JSON Array เท่านั้น`;
 
+    // 🟢 3. ส่งประเภทรูปภาพที่ถูกต้องไปให้ AI
     const imageParts = [
-      { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+      { inlineData: { data: base64Data, mimeType: mimeType } }
     ];
 
     const result = await model.generateContent([prompt, ...imageParts]);
@@ -350,10 +327,12 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
 
     res.json({ status: 'success', data: parsedData });
   } catch (error) {
+    // 🟢 4. พิมพ์ Error ลง Logs เพื่อให้เราเห็นสาเหตุที่แท้จริง
     console.error("OCR Error:", error);
-    res.status(500).json({ status: 'error', message: 'AI ไม่สามารถอ่านข้อมูลได้ หรือรูปภาพไม่ชัดเจน' });
+    res.status(500).json({ status: 'error', message: error.message || 'AI ไม่สามารถอ่านข้อมูลได้ หรือรูปภาพไม่ชัดเจน' });
   }
 });
+
 const PORT = process.env.PORT || 3000;
-// 🟢 4. รันด้วย server.listen แทน app.listen
+// 🟢 5. รันด้วย server.listen แทน app.listen
 server.listen(PORT, () => console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`));
