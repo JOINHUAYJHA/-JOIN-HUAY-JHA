@@ -304,8 +304,8 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
     ห้ามอธิบายความ ห้ามมีข้อความอื่นใดๆ ตอบกลับมาแค่ JSON Array เท่านั้น`;
 
     // 🟢 1. เปลี่ยน URL เป็นรุ่น 1.0 Pro Vision ที่รองรับทุกบัญชี
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro-vision-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
-    
+// 🟢 เปลี่ยน URL กลับมาใช้รุ่น 1.5-flash เพราะเราได้ API Key ที่ถูกต้องมาแล้ว
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;    
     // 🟢 2. เอาคำสั่ง generationConfig ออก (เพราะรุ่น 1.0 ไม่รองรับ) และปรับรูปแบบคำสั่งให้ตรงเป๊ะ
     const response = await fetch(url, {
         method: "POST",
