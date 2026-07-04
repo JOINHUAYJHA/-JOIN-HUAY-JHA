@@ -273,15 +273,23 @@ cron.schedule('59 23 * * *', async () => {
 // ==========================================
 // 🤖 API AI SCAN โพยหวย (ระบบสลับโมเดลอัตโนมัติ)
 // ==========================================
+// ==========================================
+// 🤖 API AI SCAN โพยหวย (เปลี่ยนมาใช้ OpenAI - GPT-4o-mini)
+// ==========================================
 app.post('/api/scan-bill', checkAuth, async (req, res) => {
   try {
     const { imageBase64 } = req.body;
     if (!imageBase64) return res.status(400).json({ status: 'error', message: 'ไม่พบรูปภาพ' });
-    if (!process.env.GEMINI_API_KEY) return res.status(500).json({ status: 'error', message: 'ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในระบบหลังบ้าน' });
 
-    const mimeMatch = imageBase64.match(/^data:(image\/\w+);base64,/);
-    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    // 🟢 เปลี่ยนมาเช็ค Key ของ OpenAI แทน
+    if (!process.env.OPENAI_API_KEY) {
+        return res.status(500).json({ status: 'error', message: 'ยังไม่ได้ตั้งค่า OPENAI_API_KEY ในระบบหลังบ้าน' });
+    }
+
+    // จัดรูปแบบรูปภาพให้ OpenAI อ่านได้
+    const imageUrl = imageBase64.startsWith('data:image') 
+        ? imageBase64 
+        : `data:image/jpeg;base64,${imageBase64}`;
 
     const prompt = `วิเคราะห์รูปภาพโพยหวยที่เขียนด้วยลายมือ และแปลงเป็น JSON Array เท่านั้น โครงสร้าง: [{"type": "รูปแบบ", "number": "เลข", "price": ราคา}]
     กฎการวิเคราะห์โพย:
@@ -293,50 +301,39 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
        - ถ้าเป็นเลข 3 ตัว (เช่น 468, 846) แล้วเขียน 3x3 ให้แยกเป็น 2 รายการ คือ "3 บน" ราคา 3 และ "3 โต๊ด" ราคา 3
     ห้ามอธิบายความ ห้ามมีข้อความอื่นใดๆ ตอบกลับมาแค่ JSON Array เท่านั้น`;
 
-    const payload = {
-        contents: [{
-            parts: [
-                { text: prompt },
-                { inlineData: { mimeType: mimeType, data: base64Data } }
-            ]
-        }]
-    };
-
-    // 🟢 ลองยิงด้วยรุ่น 1.5 Flash ก่อน
-    const urlPrimary = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const url = 'https://api.openai.com/v1/chat/completions';
     
-    let response = await fetch(urlPrimary, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+    // 🟢 ยิงคำสั่งตรงไปที่ OpenAI API
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: prompt },
+                        { type: "image_url", image_url: { url: imageUrl } }
+                    ]
+                }
+            ],
+            max_tokens: 1500
+        })
     });
 
-    let data = await response.json();
+    const data = await response.json();
 
-    // 🔄 หากเจอ 404 (หาโมเดล 1.5 ไม่เจอ) จะสลับมารุ่น 1.0 อัตโนมัติทันที
     if (!response.ok) {
-        if (response.status === 404) {
-            console.log("⚠️ API Key นี้ไม่มีสิทธิ์ใช้ 1.5 Flash กำลังสลับไปใช้รุ่น 1.0 Pro Vision อัตโนมัติ...");
-            const urlFallback = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro-vision-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
-            
-            response = await fetch(urlFallback, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
-            data = await response.json();
-            
-            if (!response.ok) {
-                console.error("Gemini Fallback Error:", JSON.stringify(data));
-                return res.status(500).json({ status: 'error', message: data.error?.message || 'Google ปฏิเสธการเชื่อมต่อทั้ง 2 รุ่น' });
-            }
-        } else {
-            console.error("Gemini API Error:", JSON.stringify(data));
-            return res.status(500).json({ status: 'error', message: data.error?.message || 'Google ปฏิเสธการเชื่อมต่อ' });
-        }
+        console.error("OpenAI API Error:", JSON.stringify(data));
+        return res.status(500).json({ status: 'error', message: data.error?.message || 'OpenAI ปฏิเสธการเชื่อมต่อ' });
     }
 
-    const responseText = data.candidates[0].content.parts[0].text;
+    // 🟢 สกัดเอา JSON จากคำตอบของ ChatGPT
+    const responseText = data.choices[0].message.content;
     const cleanJsonText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsedData = JSON.parse(cleanJsonText);
 
@@ -347,8 +344,5 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
   }
 });
 
-// ==========================================
-// 🟢 สั่งเปิด Server
-// ==========================================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`));
