@@ -295,9 +295,8 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-   const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-pro", // 🟢 เปลี่ยนแค่คำว่า flash-latest เป็น pro ครับ
-        generationConfig: { responseMimeType: "application/json" }
+  const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.0-pro-vision-latest" 
     });
 
     // 🟢 2. คำสั่งที่สอนให้ AI เข้าใจโพยหวย (อัปเดตรองรับการเขียนแบบ 2x2, 5x5)
