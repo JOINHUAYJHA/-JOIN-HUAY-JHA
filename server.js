@@ -276,10 +276,7 @@ cron.schedule('59 23 * * *', async () => {
     }
   } catch (error) { console.error("Cron Job Error:", error); }
 }, { scheduled: true, timezone: "Asia/Bangkok" });
-// 🟢 เพิ่มการเรียกใช้ Google Generative AI ไว้ด้านบนสุดของไฟล์ (ถัดจาก const mongoose)
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-
-// 🟢 เพิ่ม Route สำหรับรับรูปภาพไปสแกน (วางไว้แถวๆ หมวด API ROUTES)
+// 🟢 เปลี่ยนมาใช้ API แบบยิงตรง (Fetch) ทิ้ง SDK ตัวเก่าไปเลยครับ
 app.post('/api/scan-bill', checkAuth, async (req, res) => {
   try {
     const { imageBase64 } = req.body;
@@ -289,17 +286,11 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
         return res.status(500).json({ status: 'error', message: 'ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในระบบหลังบ้าน' });
     }
 
-    // 🟢 1. ดึงประเภทของรูปภาพอัตโนมัติ (เช่น image/png, image/jpeg)
+    // ดึงประเภทและข้อมูลรูปภาพ
     const mimeMatch = imageBase64.match(/^data:(image\/\w+);base64,/);
     const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.0-pro-vision-latest" 
-    });
-
-    // 🟢 2. คำสั่งที่สอนให้ AI เข้าใจโพยหวย (อัปเดตรองรับการเขียนแบบ 2x2, 5x5)
     const prompt = `วิเคราะห์รูปภาพโพยหวยที่เขียนด้วยลายมือ และแปลงเป็น JSON Array เท่านั้น โครงสร้าง: [{"type": "รูปแบบ", "number": "เลข", "price": ราคา}]
     
     กฎการวิเคราะห์โพย:
@@ -312,26 +303,39 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
        
     ห้ามอธิบายความ ห้ามมีข้อความอื่นใดๆ ตอบกลับมาแค่ JSON Array เท่านั้น`;
 
-    // 🟢 3. ส่งประเภทรูปภาพที่ถูกต้องไปให้ AI
-    const imageParts = [
-      { inlineData: { data: base64Data, mimeType: mimeType } }
-    ];
-
-    const result = await model.generateContent([prompt, ...imageParts]);
-    const responseText = result.response.text();
+    // 🟢 ใช้ Fetch API ยิงตรงไปที่ Google (ใช้รุ่น gemini-1.5-flash มาตรฐาน)
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
     
-    // ทำความสะอาดข้อความ เผื่อ AI ส่ง ```json มาครอบไว้
+    const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            contents: [{
+                parts: [
+                    { text: prompt },
+                    { inline_data: { mime_type: mimeType, data: base64Data } }
+                ]
+            }],
+            generationConfig: { responseMimeType: "application/json" }
+        })
+    });
+
+    const data = await response.json();
+
+    // ดักจับ Error จากฝั่ง Google โดยตรง
+    if (!response.ok) {
+        console.error("Gemini Direct API Error:", data);
+        return res.status(500).json({ status: 'error', message: data.error?.message || 'Google API ปฏิเสธการเชื่อมต่อ' });
+    }
+
+    // สกัดเอาเฉพาะข้อความที่ AI ตอบกลับมา
+    const responseText = data.candidates[0].content.parts[0].text;
     const cleanJsonText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsedData = JSON.parse(cleanJsonText);
 
     res.json({ status: 'success', data: parsedData });
   } catch (error) {
-    // 🟢 4. พิมพ์ Error ลง Logs เพื่อให้เราเห็นสาเหตุที่แท้จริง
     console.error("OCR Error:", error);
-    res.status(500).json({ status: 'error', message: error.message || 'AI ไม่สามารถอ่านข้อมูลได้ หรือรูปภาพไม่ชัดเจน' });
+    res.status(500).json({ status: 'error', message: error.message || 'AI ไม่สามารถอ่านข้อมูลได้' });
   }
 });
-
-const PORT = process.env.PORT || 3000;
-// 🟢 5. รันด้วย server.listen แทน app.listen
-server.listen(PORT, () => console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`));
