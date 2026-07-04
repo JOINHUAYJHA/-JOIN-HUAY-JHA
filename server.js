@@ -319,7 +319,6 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
                     { inline_data: { mime_type: mimeType, data: base64Data } } 
                 ]
             }],
-            generationConfig: { responseMimeType: "application/json" }
         })
     });
     const data = await response.json();
