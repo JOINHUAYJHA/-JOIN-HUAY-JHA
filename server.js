@@ -295,8 +295,8 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash-latest", // 🟢 แก้ไขบรรทัดนี้บรรทัดเดียวครับ
+   const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-pro", // 🟢 เปลี่ยนแค่คำว่า flash-latest เป็น pro ครับ
         generationConfig: { responseMimeType: "application/json" }
     });
 
