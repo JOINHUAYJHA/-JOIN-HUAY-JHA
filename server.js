@@ -339,3 +339,14 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
     res.status(500).json({ status: 'error', message: error.message || 'AI ไม่สามารถอ่านข้อมูลได้' });
   }
 });
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`));
+res.json({ status: 'success', data: parsedData });
+  } catch (error) {
+    console.error("OCR Error:", error);
+    res.status(500).json({ status: 'error', message: error.message || 'AI ไม่สามารถอ่านข้อมูลได้' });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`));
