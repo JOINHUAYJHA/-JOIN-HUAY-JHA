@@ -289,15 +289,40 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
         return res.status(500).json({ status: 'error', message: 'ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในระบบหลังบ้าน' });
     }
 
-    // ตัดส่วนหัว 'data:image/jpeg;base64,' ออกถ้ามี
+    // 🟢 1. ดึงประเภทของรูปภาพอัตโนมัติ (เช่น image/png, image/jpeg)
+    const mimeMatch = imageBase64.match(/^data:(image\/\w+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash",
-    generationConfig: { 
-        responseMimeType: "application/json"  // 🟢 คำสั่งนี้จะบังคับให้ AI ส่งมาแค่ข้อมูล ห้ามมีข้อความอื่นปน
-    }
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+        generationConfig: { responseMimeType: "application/json" }
+    });
+
+    const prompt = `วิเคราะห์รูปภาพโพยหวย และแปลงเป็น JSON Array เท่านั้น โครงสร้าง: [{"type": "รูปแบบ", "number": "เลข", "price": ราคา}]
+    - type ให้เลือกจาก: "3 บน", "3 โต๊ด", "2 บน", "2 ล่าง", "วิ่งบน", "วิ่งล่าง"
+    - ถ้าเจอคำว่า "บล" หรือ "x" ให้แยกเป็น 2 รายการ (เช่น 2 บน และ 2 ล่าง)
+    - price ต้องเป็นตัวเลขเท่านั้น (Number)
+    ห้ามใส่ข้อความอธิบายใดๆ นอกเหนือจาก JSON Array`;
+
+    // 🟢 2. ส่งประเภทรูปภาพที่ถูกต้องไปให้ AI
+    const imageParts = [
+      { inlineData: { data: base64Data, mimeType: mimeType } }
+    ];
+
+    const result = await model.generateContent([prompt, ...imageParts]);
+    const responseText = result.response.text();
+    
+    const cleanJsonText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsedData = JSON.parse(cleanJsonText);
+
+    res.json({ status: 'success', data: parsedData });
+  } catch (error) {
+    // 🟢 3. พิมพ์ Error ลง Logs เพื่อให้เราเห็นสาเหตุที่แท้จริง
+    console.error("OCR Error:", error);
+    res.status(500).json({ status: 'error', message: error.message || 'AI ไม่สามารถอ่านข้อมูลได้' });
+  }
 });
     // คำสั่งที่สอนให้ AI เข้าใจโพยหวย
    const prompt = `วิเคราะห์รูปภาพโพยหวยที่เขียนด้วยลายมือ และแปลงเป็น JSON Array เท่านั้น โครงสร้าง: [{"type": "รูปแบบ", "number": "เลข", "price": ราคา}]
