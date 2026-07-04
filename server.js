@@ -3,12 +3,10 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const cron = require('node-cron'); 
-// 🟢 1. นำเข้า http และ socket.io
 const http = require('http');
 const { Server } = require("socket.io");
 
 const app = express();
-// 🟢 2. สร้าง HTTP Server และผูก Socket.io เข้าไป
 const server = http.createServer(app);
 const io = new Server(server, { 
   cors: { origin: "*", methods: ["GET", "POST", "PUT", "DELETE"] } 
@@ -85,7 +83,7 @@ const AppData = mongoose.model('AppData', appDataSchema);
 const AuditLog = mongoose.model('AuditLog', auditLogSchema); 
 
 // ==========================================
-// 🚀 API ROUTES
+// 🚀 API ROUTES (ระบบจัดการบิล)
 // ==========================================
 app.post('/api/verify_pin', (req, res) => {
   const { pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
@@ -161,7 +159,6 @@ app.post('/api/bills', checkAuth, async (req, res) => {
     let msg = `🧾 <b>โพยใหม่เข้าสู่ระบบ!</b>\n👤 ลูกค้า: ${customerNameNew}\n🏷️ รหัส: ${billIdNew} (${validItems.length} รายการ)\n💰 ยอดรวม: ${totalPrice.toLocaleString()} ฿\n`;
     sendTelegramNotify(msg);
 
-    // 🟢 3. กระจายสัญญาณแจ้งหน้าเว็บให้โหลดข้อมูลใหม่ทันที
     io.emit('data_updated', { message: `📥 มีโพยใหม่เข้า: ${customerNameNew} (${totalPrice.toLocaleString()} ฿)` });
 
     res.json({ status: 'success', billId: billIdNew, timestamp: d });
@@ -187,7 +184,6 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
     await new AuditLog({ action: 'EDIT_BILL', billId: targetBillId, details: `ยอดใหม่: ${newTotal} ฿`, deviceInfo, location }).save();
     sendTelegramNotify(`✏️ <b>แจ้งเตือน: มีการแก้ไขบิล!</b>\n👤 ลูกค้า: ${cName}\n🏷️ รหัสบิล: ${targetBillId}\n💰 ยอดใหม่หลังแก้: ${newTotal.toLocaleString()} ฿`);
 
-    // 🟢 ส่งสัญญาณ
     io.emit('data_updated', { message: `✏️ บิล ${targetBillId} ถูกแก้ไขข้อมูล` });
 
     res.json({ status: 'success', message: 'แก้ไขสำเร็จ' });
@@ -204,10 +200,7 @@ app.delete('/api/bills/:billId', checkAuth, async (req, res) => {
     if (bill) {
       await new AuditLog({ action: 'DELETE_BILL', billId: targetBillId, details: `ลบ ${bill.totalAmount} ฿`, deviceInfo, location }).save();
       sendTelegramNotify(`🗑️ <b>แจ้งเตือน: มีการลบบิล!</b>\n🏷️ รหัสบิล: ${targetBillId}\n❌ ลบออกไป ${bill.items.length} รายการ`);
-      
-      // 🟢 ส่งสัญญาณ
       io.emit('data_updated', { message: `🗑️ บิล ${targetBillId} ถูกลบออกจากระบบ` });
-      
       res.json({ status: 'success', message: 'ลบสำเร็จ' });
     } else { res.status(404).json({ status: 'error', message: 'ไม่พบบิลที่ต้องการลบ' }); }
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
@@ -276,23 +269,21 @@ cron.schedule('59 23 * * *', async () => {
     }
   } catch (error) { console.error("Cron Job Error:", error); }
 }, { scheduled: true, timezone: "Asia/Bangkok" });
-// 🟢 เปลี่ยนมาใช้ API แบบยิงตรง (Fetch) ทิ้ง SDK ตัวเก่าไปเลยครับ
+
+// ==========================================
+// 🤖 API AI SCAN โพยหวย (ระบบสลับโมเดลอัตโนมัติ)
+// ==========================================
 app.post('/api/scan-bill', checkAuth, async (req, res) => {
   try {
     const { imageBase64 } = req.body;
     if (!imageBase64) return res.status(400).json({ status: 'error', message: 'ไม่พบรูปภาพ' });
+    if (!process.env.GEMINI_API_KEY) return res.status(500).json({ status: 'error', message: 'ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในระบบหลังบ้าน' });
 
-    if (!process.env.GEMINI_API_KEY) {
-        return res.status(500).json({ status: 'error', message: 'ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในระบบหลังบ้าน' });
-    }
-
-    // ดึงประเภทและข้อมูลรูปภาพ
     const mimeMatch = imageBase64.match(/^data:(image\/\w+);base64,/);
     const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
     const prompt = `วิเคราะห์รูปภาพโพยหวยที่เขียนด้วยลายมือ และแปลงเป็น JSON Array เท่านั้น โครงสร้าง: [{"type": "รูปแบบ", "number": "เลข", "price": ราคา}]
-    
     กฎการวิเคราะห์โพย:
     1. type ให้เลือกจาก: "3 บน", "3 โต๊ด", "2 บน", "2 ล่าง", "วิ่งบน", "วิ่งล่าง"
     2. price ต้องเป็นตัวเลข (Number) เท่านั้น
@@ -300,34 +291,51 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
     4. การแยกประเภทจากเครื่องหมาย "x":
        - ถ้าเป็นเลข 2 ตัว (เช่น 09, 94) แล้วเขียน 2x2 ให้แยกเป็น 2 รายการ คือ "2 บน" ราคา 2 และ "2 ล่าง" ราคา 2
        - ถ้าเป็นเลข 3 ตัว (เช่น 468, 846) แล้วเขียน 3x3 ให้แยกเป็น 2 รายการ คือ "3 บน" ราคา 3 และ "3 โต๊ด" ราคา 3
-       
     ห้ามอธิบายความ ห้ามมีข้อความอื่นใดๆ ตอบกลับมาแค่ JSON Array เท่านั้น`;
 
-   // 🟢 1. กลับมาใช้ v1beta (เพราะ API Key ของคุณมองเห็นโมเดลในเวอร์ชันนี้ครับ)
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const payload = {
+        contents: [{
+            parts: [
+                { text: prompt },
+                { inlineData: { mimeType: mimeType, data: base64Data } }
+            ]
+        }]
+    };
+
+    // 🟢 ลองยิงด้วยรุ่น 1.5 Flash ก่อน
+    const urlPrimary = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
     
-    // 🟢 2. ส่งข้อมูลแบบคลีนๆ ไม่มี generationConfig กวนใจ
-    const response = await fetch(url, {
+    let response = await fetch(urlPrimary, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            contents: [{
-                parts: [
-                    { text: prompt },
-                    { inline_data: { mime_type: mimeType, data: base64Data } } 
-                ]
-            }]
-        }) 
+        body: JSON.stringify(payload)
     });
-    const data = await response.json();
 
-    // ดักจับ Error จากฝั่ง Google โดยตรง
+    let data = await response.json();
+
+    // 🔄 หากเจอ 404 (หาโมเดล 1.5 ไม่เจอ) จะสลับมารุ่น 1.0 อัตโนมัติทันที
     if (!response.ok) {
-        console.error("Gemini Direct API Error:", data);
-        return res.status(500).json({ status: 'error', message: data.error?.message || 'Google API ปฏิเสธการเชื่อมต่อ' });
+        if (response.status === 404) {
+            console.log("⚠️ API Key นี้ไม่มีสิทธิ์ใช้ 1.5 Flash กำลังสลับไปใช้รุ่น 1.0 Pro Vision อัตโนมัติ...");
+            const urlFallback = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro-vision-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
+            
+            response = await fetch(urlFallback, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            data = await response.json();
+            
+            if (!response.ok) {
+                console.error("Gemini Fallback Error:", JSON.stringify(data));
+                return res.status(500).json({ status: 'error', message: data.error?.message || 'Google ปฏิเสธการเชื่อมต่อทั้ง 2 รุ่น' });
+            }
+        } else {
+            console.error("Gemini API Error:", JSON.stringify(data));
+            return res.status(500).json({ status: 'error', message: data.error?.message || 'Google ปฏิเสธการเชื่อมต่อ' });
+        }
     }
 
-    // สกัดเอาเฉพาะข้อความที่ AI ตอบกลับมา
     const responseText = data.candidates[0].content.parts[0].text;
     const cleanJsonText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsedData = JSON.parse(cleanJsonText);
@@ -339,6 +347,8 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
   }
 });
 
-
+// ==========================================
+// 🟢 สั่งเปิด Server
+// ==========================================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`));
