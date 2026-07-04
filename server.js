@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const cron = require('node-cron'); // 🟢 เพิ่มโมดูลตั้งเวลาอัตโนมัติ
+const cron = require('node-cron'); 
 
 const app = express();
 app.use(cors());
@@ -75,7 +75,6 @@ const appDataSchema = new mongoose.Schema({
     value: { type: mongoose.Schema.Types.Mixed, required: true }
 });
 
-// 🟢 โครงสร้างฐานข้อมูล ตารางจับผิดการทุจริต (Audit Log)
 const auditLogSchema = new mongoose.Schema({
     action: { type: String, required: true },
     billId: { type: String, required: true },
@@ -89,7 +88,7 @@ const auditLogSchema = new mongoose.Schema({
 const Bill = mongoose.model('Bill', billSchema);
 const ArchiveBill = mongoose.model('ArchiveBill', billSchema); 
 const AppData = mongoose.model('AppData', appDataSchema);
-const AuditLog = mongoose.model('AuditLog', auditLogSchema); // 🟢 ใช้งาน Audit Log
+const AuditLog = mongoose.model('AuditLog', auditLogSchema); 
 
 // ==========================================
 // 🚀 API ROUTES (เส้นทางข้อมูลต่างๆ)
@@ -141,8 +140,8 @@ app.post('/api/appdata', checkAuth, async (req, res) => {
 // --- ระบบจัดการบิล (GET, POST, PUT, DELETE) ---
 app.get('/api/bills', checkAuth, async (req, res) => {
   try {
-    // 🟢 ดึงข้อมูลทีละ 1000 รายการล่าสุด ป้องกันเซิร์ฟเวอร์ค้างเมื่อบิลเยอะ
-    const bills = await Bill.find().sort({ createdAt: -1 }).limit(1000);
+    // 🟢 แก้ไข: ลบ .limit(1000) ออก เพื่อให้หน้าเว็บดึงข้อมูลไปแสดงยอดรวมได้ครบ 100%
+    const bills = await Bill.find().sort({ createdAt: -1 });
     let flatData = [];
     bills.forEach(b => {
       b.items.forEach(i => {
@@ -162,8 +161,11 @@ app.post('/api/bills', checkAuth, async (req, res) => {
     const customerNameNew = customerName || "ลูกค้าทั่วไป";
     const d = timestamp ? new Date(timestamp) : new Date();
     const shortDate = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0');
+    
+    // 🟢 แก้ไข: ใช้เวลาเสี้ยววินาทีมาผสม ป้องกันปัญหาเลขบิลซ้ำกัน
+    const timeStr = Date.now().toString().slice(-3);
     const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const billIdNew = `B${shortDate}-${randomNum}`;
+    const billIdNew = `B${shortDate}-${timeStr}${randomNum}`;
 
     let totalPrice = 0;
     let validItems = [];
@@ -213,7 +215,6 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
 
     await Bill.findOneAndUpdate({ billId: targetBillId }, { customerName: cName, items: validItems, totalAmount: newTotal });
 
-    // 🟢 บันทึก Audit Log แอบจดว่ามีการแก้ไขบิล
     await new AuditLog({
         action: 'EDIT_BILL',
         billId: targetBillId,
@@ -236,7 +237,6 @@ app.delete('/api/bills/:billId', checkAuth, async (req, res) => {
 
     const bill = await Bill.findOneAndDelete({ billId: targetBillId });
     if (bill) {
-      // 🟢 บันทึก Audit Log แอบจดว่ามีการลบบิล
       await new AuditLog({
           action: 'DELETE_BILL',
           billId: targetBillId,
@@ -344,13 +344,12 @@ app.post('/api/migrate', checkAuth, async (req, res) => {
 // ==========================================
 // 🤖 ระบบหุ่นยนต์ทำงานอัตโนมัติ (Cron Jobs)
 // ==========================================
-// สั่งให้เซิร์ฟเวอร์สรุปยอดส่งเข้า Telegram ทุกคืนเวลา 23:59 น.
+// 🟢 แก้ไข: เพิ่มคำสั่ง timezone เพื่อบังคับให้เซิร์ฟเวอร์รันตามเวลาประเทศไทย (ป้องกันบั๊กสรุปยอดผิดเวลา)
 cron.schedule('59 23 * * *', async () => {
     try {
         const today = new Date();
-        today.setHours(0, 0, 0, 0); // เริ่มนับตั้งแต่เที่ยงคืนของวันนี้
+        today.setHours(0, 0, 0, 0); 
         
-        // ดึงเฉพาะบิลที่เกิดขึ้นในวันนี้
         const billsToday = await Bill.find({ createdAt: { $gte: today } });
         
         let totalSales = 0;
@@ -374,6 +373,9 @@ cron.schedule('59 23 * * *', async () => {
     } catch (error) {
         console.error("Cron Job Error:", error);
     }
+}, {
+    scheduled: true,
+    timezone: "Asia/Bangkok"
 });
 
 
