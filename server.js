@@ -3,8 +3,17 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const cron = require('node-cron'); 
+// 🟢 1. นำเข้า http และ socket.io
+const http = require('http');
+const { Server } = require("socket.io");
 
 const app = express();
+// 🟢 2. สร้าง HTTP Server และผูก Socket.io เข้าไป
+const server = http.createServer(app);
+const io = new Server(server, { 
+  cors: { origin: "*", methods: ["GET", "POST", "PUT", "DELETE"] } 
+});
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
@@ -40,7 +49,7 @@ const sendTelegramNotify = async (message) => {
 };
 
 // ==========================================
-// 🔐 ระบบยืนยันตัวตน (Authentication Middleware)
+// 🔐 ระบบยืนยันตัวตน
 // ==========================================
 const checkAuth = (req, res, next) => {
   const pin = req.headers['authorization'];
@@ -57,11 +66,9 @@ const checkAuth = (req, res, next) => {
 };
 
 // ==========================================
-// 📦 โครงสร้างฐานข้อมูล (Database Models)
+// 📦 โครงสร้างฐานข้อมูล
 // ==========================================
-const itemSchema = new mongoose.Schema({
-  category: String, type: String, number: String, price: Number, memo: String
-});
+const itemSchema = new mongoose.Schema({ category: String, type: String, number: String, price: Number, memo: String });
 const billSchema = new mongoose.Schema({
   billId: { type: String, required: true, unique: true },
   customerName: { type: String, default: 'ลูกค้าทั่วไป' },
@@ -69,32 +76,17 @@ const billSchema = new mongoose.Schema({
   items: [itemSchema],
   createdAt: { type: Date, default: Date.now }
 });
+const appDataSchema = new mongoose.Schema({ key: { type: String, required: true, unique: true }, value: { type: mongoose.Schema.Types.Mixed, required: true } });
+const auditLogSchema = new mongoose.Schema({ action: { type: String, required: true }, billId: { type: String, required: true }, details: { type: String }, deviceInfo: { type: String }, location: { type: String }, timestamp: { type: Date, default: Date.now } });
 
-const appDataSchema = new mongoose.Schema({
-    key: { type: String, required: true, unique: true },
-    value: { type: mongoose.Schema.Types.Mixed, required: true }
-});
-
-const auditLogSchema = new mongoose.Schema({
-    action: { type: String, required: true },
-    billId: { type: String, required: true },
-    details: { type: String }, 
-    deviceInfo: { type: String },
-    location: { type: String },
-    timestamp: { type: Date, default: Date.now }
-});
-
-// ประกาศใช้งาน Model 
 const Bill = mongoose.model('Bill', billSchema);
 const ArchiveBill = mongoose.model('ArchiveBill', billSchema); 
 const AppData = mongoose.model('AppData', appDataSchema);
 const AuditLog = mongoose.model('AuditLog', auditLogSchema); 
 
 // ==========================================
-// 🚀 API ROUTES (เส้นทางข้อมูลต่างๆ)
+// 🚀 API ROUTES
 // ==========================================
-
-// --- ตรวจสอบรหัส PIN ---
 app.post('/api/verify_pin', (req, res) => {
   const { pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
   if (pin === process.env.ADMIN_PIN) {
@@ -105,42 +97,26 @@ app.post('/api/verify_pin', (req, res) => {
   }
 });
 
-// --- ดึง/อัปเดต ข้อมูลตั้งค่า เรตจ่าย เลขอั้น ผลรางวัล (Sync) ---
 app.get('/api/appdata', checkAuth, async (req, res) => {
     try {
         const allData = await AppData.find();
         const dataObj = {};
-        allData.forEach(item => {
-            dataObj[item.key] = item.value;
-        });
+        allData.forEach(item => { dataObj[item.key] = item.value; });
         res.json({ status: 'success', data: dataObj });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ status: 'error', message: error.message });
-    }
+    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
 app.post('/api/appdata', checkAuth, async (req, res) => {
     try {
         const { key, value } = req.body;
         if (!key) return res.status(400).json({ status: 'error', message: 'กรุณาระบุชื่อคีย์' });
-
-        await AppData.findOneAndUpdate(
-            { key: key },
-            { value: value },
-            { upsert: true, new: true }
-        );
-        res.json({ status: 'success', message: 'ซิงค์ข้อมูลขึ้นเซิร์ฟเวอร์สำเร็จ' });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ status: 'error', message: error.message });
-    }
+        await AppData.findOneAndUpdate({ key: key }, { value: value }, { upsert: true, new: true });
+        res.json({ status: 'success', message: 'ซิงค์ข้อมูลสำเร็จ' });
+    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// --- ระบบจัดการบิล (GET, POST, PUT, DELETE) ---
 app.get('/api/bills', checkAuth, async (req, res) => {
   try {
-    // 🟢 แก้ไข: ลบ .limit(1000) ออก เพื่อให้หน้าเว็บดึงข้อมูลไปแสดงยอดรวมได้ครบ 100%
     const bills = await Bill.find().sort({ createdAt: -1 });
     let flatData = [];
     bills.forEach(b => {
@@ -162,7 +138,6 @@ app.post('/api/bills', checkAuth, async (req, res) => {
     const d = timestamp ? new Date(timestamp) : new Date();
     const shortDate = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0');
     
-    // 🟢 แก้ไข: ใช้เวลาเสี้ยววินาทีมาผสม ป้องกันปัญหาเลขบิลซ้ำกัน
     const timeStr = Date.now().toString().slice(-3);
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const billIdNew = `B${shortDate}-${timeStr}${randomNum}`;
@@ -174,22 +149,20 @@ app.post('/api/bills', checkAuth, async (req, res) => {
       let p = parseFloat(i.price);
       if (!isNaN(p) && p > 0) {
         totalPrice += p;
-        validItems.push({
-          category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, 
-          number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-"
-        });
+        validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-" });
       }
     });
 
     if (validItems.length === 0) throw new Error("ไม่มีรายการที่สามารถบันทึกได้");
 
-    const newBill = new Bill({
-      billId: billIdNew, customerName: customerNameNew, totalAmount: totalPrice, items: validItems, createdAt: d
-    });
+    const newBill = new Bill({ billId: billIdNew, customerName: customerNameNew, totalAmount: totalPrice, items: validItems, createdAt: d });
     await newBill.save();
 
     let msg = `🧾 <b>โพยใหม่เข้าสู่ระบบ!</b>\n👤 ลูกค้า: ${customerNameNew}\n🏷️ รหัส: ${billIdNew} (${validItems.length} รายการ)\n💰 ยอดรวม: ${totalPrice.toLocaleString()} ฿\n`;
     sendTelegramNotify(msg);
+
+    // 🟢 3. กระจายสัญญาณแจ้งหน้าเว็บให้โหลดข้อมูลใหม่ทันที
+    io.emit('data_updated', { message: `📥 มีโพยใหม่เข้า: ${customerNameNew} (${totalPrice.toLocaleString()} ฿)` });
 
     res.json({ status: 'success', billId: billIdNew, timestamp: d });
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
@@ -201,29 +174,21 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
     const { customerName, items, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
     const cName = customerName || "ลูกค้าทั่วไป";
 
-    let newTotal = 0;
-    let validItems = [];
+    let newTotal = 0; let validItems = [];
     items.forEach(i => {
       let p = parseFloat(i.price);
       if (!isNaN(p) && p > 0) {
         newTotal += p;
-        validItems.push({
-          category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-"
-        });
+        validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-" });
       }
     });
 
     await Bill.findOneAndUpdate({ billId: targetBillId }, { customerName: cName, items: validItems, totalAmount: newTotal });
+    await new AuditLog({ action: 'EDIT_BILL', billId: targetBillId, details: `ยอดใหม่: ${newTotal} ฿`, deviceInfo, location }).save();
+    sendTelegramNotify(`✏️ <b>แจ้งเตือน: มีการแก้ไขบิล!</b>\n👤 ลูกค้า: ${cName}\n🏷️ รหัสบิล: ${targetBillId}\n💰 ยอดใหม่หลังแก้: ${newTotal.toLocaleString()} ฿`);
 
-    await new AuditLog({
-        action: 'EDIT_BILL',
-        billId: targetBillId,
-        details: `แก้ไขเป็น ${validItems.length} รายการ | ยอดใหม่: ${newTotal} ฿`,
-        deviceInfo, location
-    }).save();
-
-    let editMsg = `✏️ <b>แจ้งเตือน: มีการแก้ไขบิล!</b>\n👤 ลูกค้า: ${cName}\n🏷️ รหัสบิล: ${targetBillId}\n💰 ยอดใหม่หลังแก้: ${newTotal.toLocaleString()} ฿\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`;
-    sendTelegramNotify(editMsg);
+    // 🟢 ส่งสัญญาณ
+    io.emit('data_updated', { message: `✏️ บิล ${targetBillId} ถูกแก้ไขข้อมูล` });
 
     res.json({ status: 'success', message: 'แก้ไขสำเร็จ' });
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
@@ -237,150 +202,81 @@ app.delete('/api/bills/:billId', checkAuth, async (req, res) => {
 
     const bill = await Bill.findOneAndDelete({ billId: targetBillId });
     if (bill) {
-      await new AuditLog({
-          action: 'DELETE_BILL',
-          billId: targetBillId,
-          details: `ลบ ${bill.items.length} รายการ มูลค่า ${bill.totalAmount} ฿`,
-          deviceInfo, location
-      }).save();
-
-      sendTelegramNotify(`🗑️ <b>แจ้งเตือน: มีการลบบิล!</b>\n🏷️ รหัสบิล: ${targetBillId}\n❌ ลบออกไป ${bill.items.length} รายการ\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
+      await new AuditLog({ action: 'DELETE_BILL', billId: targetBillId, details: `ลบ ${bill.totalAmount} ฿`, deviceInfo, location }).save();
+      sendTelegramNotify(`🗑️ <b>แจ้งเตือน: มีการลบบิล!</b>\n🏷️ รหัสบิล: ${targetBillId}\n❌ ลบออกไป ${bill.items.length} รายการ`);
+      
+      // 🟢 ส่งสัญญาณ
+      io.emit('data_updated', { message: `🗑️ บิล ${targetBillId} ถูกลบออกจากระบบ` });
+      
       res.json({ status: 'success', message: 'ลบสำเร็จ' });
-    } else {
-      res.status(404).json({ status: 'error', message: 'ไม่พบบิลที่ต้องการลบ' });
-    }
+    } else { res.status(404).json({ status: 'error', message: 'ไม่พบบิลที่ต้องการลบ' }); }
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// --- ระบบตัดรอบ (Archive) ---
 app.post('/api/archive', checkAuth, async (req, res) => {
   try {
     const bills = await Bill.find();
     if (bills.length > 0) {
       await ArchiveBill.insertMany(bills);
       await Bill.deleteMany({});
-      
-      let itemCount = 0;
-      bills.forEach(b => itemCount += b.items.length);
-
-      sendTelegramNotify(`⚠️ <b>แจ้งเตือนระบบ</b>\n\nตัดรอบสำเร็จ โอนย้าย ${itemCount} รายการเข้าเก็บใน Archive เรียบร้อยแล้ว`);
-      res.json({ status: 'success', message: `ตัดรอบสำเร็จ โอนย้าย ${itemCount} รายการเข้าเก็บเรียบร้อย` });
-    } else {
-      res.json({ status: 'error', message: 'ไม่มีข้อมูลบิลใหม่ให้ตัดรอบ' });
-    }
+      sendTelegramNotify(`⚠️ ตัดรอบสำเร็จ โอนย้ายเข้าเก็บใน Archive เรียบร้อย`);
+      io.emit('data_updated', { message: `📦 ระบบทำการตัดรอบงวดเรียบร้อยแล้ว` });
+      res.json({ status: 'success', message: `ตัดรอบสำเร็จ` });
+    } else { res.json({ status: 'error', message: 'ไม่มีข้อมูลบิลใหม่ให้ตัดรอบ' }); }
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// --- ระบบดูดข้อมูลจาก Google Sheets (Migration) ---
 app.post('/api/migrate', checkAuth, async (req, res) => {
   try {
     const { googleSheetUrl } = req.body;
-    if (!googleSheetUrl) throw new Error('ไม่ได้ระบุ URL ของ Google Sheets');
-
+    if (!googleSheetUrl) throw new Error('ไม่ได้ระบุ URL');
     const response = await fetch(googleSheetUrl);
     const textData = await response.text();
-    let result;
-    try {
-        result = JSON.parse(textData);
-    } catch (e) {
-        throw new Error('ลิงก์ Google Sheets ไม่ได้ส่งข้อมูลออกมาเป็น JSON');
-    }
-    
-    let rawData = [];
-    if (Array.isArray(result)) rawData = result; 
-    else if (result.data && Array.isArray(result.data)) rawData = result.data; 
-    else if (result.items && Array.isArray(result.items)) rawData = result.items; 
-    else if (result.result && Array.isArray(result.result)) rawData = result.result; 
-    else throw new Error('ไม่พบโครงสร้างตารางข้อมูลในลิงก์นี้ครับ');
-
-    if (rawData.length === 0) throw new Error('ไม่พบรายการบิลเลยครับ (ชีตอาจจะว่างเปล่า)');
+    let result = JSON.parse(textData);
+    let rawData = Array.isArray(result) ? result : (result.data || result.items || result.result || []);
+    if (rawData.length === 0) throw new Error('ไม่พบรายการ');
 
     let groupedBills = {};
     rawData.forEach(item => {
       let bId = item.billId || item.id || 'B-OLD-' + Math.floor(1000 + Math.random() * 9000);
-      if (!groupedBills[bId]) {
-        groupedBills[bId] = {
-          billId: bId,
-          customerName: item.customerName || item.customer || 'ลูกค้าทั่วไป',
-          timestamp: item.timestamp || item.date || new Date(),
-          totalAmount: 0,
-          items: []
-        };
-      }
+      if (!groupedBills[bId]) groupedBills[bId] = { billId: bId, customerName: item.customerName || item.customer || 'ลูกค้าทั่วไป', timestamp: item.timestamp || item.date || new Date(), totalAmount: 0, items: [] };
       let p = parseFloat(item.price || item.amount);
       if (!isNaN(p) && p > 0) {
         groupedBills[bId].totalAmount += p;
-        groupedBills[bId].items.push({
-          category: item.category || 'ข้อมูลบิลทั่วไป',
-          type: item.type,
-          number: String(item.number || item.num).replace(/^'/, '').trim(),
-          price: p,
-          memo: item.memo || '-'
-        });
+        groupedBills[bId].items.push({ category: item.category || 'ทั่วไป', type: item.type, number: String(item.number || item.num).replace(/^'/, '').trim(), price: p, memo: item.memo || '-' });
       }
     });
 
     let count = 0;
     for (let key in groupedBills) {
-      const billData = groupedBills[key];
-      const exist = await Bill.findOne({ billId: billData.billId });
-      const existArchived = await ArchiveBill.findOne({ billId: billData.billId });
-      
+      const b = groupedBills[key];
+      const exist = await Bill.findOne({ billId: b.billId });
+      const existArchived = await ArchiveBill.findOne({ billId: b.billId });
       if (!exist && !existArchived) {
-        const newBill = new Bill({
-          billId: billData.billId, customerName: billData.customerName, totalAmount: billData.totalAmount, items: billData.items, createdAt: billData.timestamp
-        });
-        await newBill.save();
+        await new Bill({ billId: b.billId, customerName: b.customerName, totalAmount: b.totalAmount, items: b.items, createdAt: b.timestamp }).save();
         count++;
       }
     }
-
-    if (count > 0) sendTelegramNotify(`🚚 <b>ย้ายฐานข้อมูลสำเร็จ!</b>\nดูดบิลเก่าจำนวน ${count} บิลเรียบร้อย 🎉`);
-    res.json({ status: 'success', message: `ดึงข้อมูลเสร็จสิ้น! นำเข้าบิลเก่าจำนวน ${count} บิล` });
+    if (count > 0) {
+        sendTelegramNotify(`🚚 นำเข้าบิลเก่าจำนวน ${count} บิล`);
+        io.emit('data_updated', { message: `📥 ดึงประวัติเก่าสำเร็จ ${count} บิล` });
+    }
+    res.json({ status: 'success', message: `ดึงข้อมูลเสร็จสิ้น!` });
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-
-// ==========================================
-// 🤖 ระบบหุ่นยนต์ทำงานอัตโนมัติ (Cron Jobs)
-// ==========================================
-// 🟢 แก้ไข: เพิ่มคำสั่ง timezone เพื่อบังคับให้เซิร์ฟเวอร์รันตามเวลาประเทศไทย (ป้องกันบั๊กสรุปยอดผิดเวลา)
 cron.schedule('59 23 * * *', async () => {
-    try {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0); 
-        
-        const billsToday = await Bill.find({ createdAt: { $gte: today } });
-        
-        let totalSales = 0;
-        let totalItems = 0;
-        
-        billsToday.forEach(b => {
-            totalSales += b.totalAmount;
-            totalItems += b.items.length;
-        });
-
-        if (billsToday.length > 0) {
-            let msg = `📊 <b>สรุปยอดขายประจำวัน!</b> 📊\n`;
-            msg += `📅 วันที่: ${new Date().toLocaleDateString('th-TH')}\n`;
-            msg += `🧾 จำนวนบิล: ${billsToday.length} บิล\n`;
-            msg += `📝 จำนวนรายการ: ${totalItems} รายการ\n`;
-            msg += `💰 <b>ยอดขายรวม: ${totalSales.toLocaleString()} บาท</b>\n`;
-            msg += `✅ พักผ่อนได้เลยครับ บอทสรุปยอดให้แล้ว!`;
-            
-            sendTelegramNotify(msg);
-        }
-    } catch (error) {
-        console.error("Cron Job Error:", error);
+  try {
+    const today = new Date(); today.setHours(0, 0, 0, 0); 
+    const billsToday = await Bill.find({ createdAt: { $gte: today } });
+    let totalSales = 0; let totalItems = 0;
+    billsToday.forEach(b => { totalSales += b.totalAmount; totalItems += b.items.length; });
+    if (billsToday.length > 0) {
+      sendTelegramNotify(`📊 <b>สรุปยอดขายประจำวัน!</b> 📊\n📅 วันที่: ${new Date().toLocaleDateString('th-TH')}\n🧾 จำนวนบิล: ${billsToday.length} บิล\n📝 จำนวนรายการ: ${totalItems} รายการ\n💰 <b>ยอดขายรวม: ${totalSales.toLocaleString()} บาท</b>\n✅ พักผ่อนได้เลยครับ!`);
     }
-}, {
-    scheduled: true,
-    timezone: "Asia/Bangkok"
-});
+  } catch (error) { console.error("Cron Job Error:", error); }
+}, { scheduled: true, timezone: "Asia/Bangkok" });
 
-
-// ==========================================
-// 🚀 เริ่มต้นการทำงานของเซิร์ฟเวอร์
-// ==========================================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server เปิดรันอยู่ที่พอร์ต ${PORT}`));
+// 🟢 4. รันด้วย server.listen แทน app.listen
+server.listen(PORT, () => console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`));
