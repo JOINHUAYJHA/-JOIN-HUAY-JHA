@@ -276,7 +276,54 @@ cron.schedule('59 23 * * *', async () => {
     }
   } catch (error) { console.error("Cron Job Error:", error); }
 }, { scheduled: true, timezone: "Asia/Bangkok" });
+// 🟢 เพิ่มการเรียกใช้ Google Generative AI ไว้ด้านบนสุดของไฟล์ (ถัดจาก const mongoose)
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
+// 🟢 เพิ่ม Route สำหรับรับรูปภาพไปสแกน (วางไว้แถวๆ หมวด API ROUTES)
+app.post('/api/scan-bill', checkAuth, async (req, res) => {
+  try {
+    const { imageBase64 } = req.body;
+    if (!imageBase64) return res.status(400).json({ status: 'error', message: 'ไม่พบรูปภาพ' });
+
+    if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ status: 'error', message: 'ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในระบบหลังบ้าน' });
+    }
+
+    // ตัดส่วนหัว 'data:image/jpeg;base64,' ออกถ้ามี
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    // คำสั่งที่สอนให้ AI เข้าใจโพยหวย
+    const prompt = `นี่คือรูปภาพโพยหวยของไทย ให้คุณอ่านตัวเลขและราคาที่อยู่ในภาพ 
+    และแปลงข้อมูลให้อยู่ในรูปแบบ JSON Array เท่านั้น โดยแต่ละ Object ต้องมี key ดังนี้:
+    - "type": รูปแบบการแทง (เช่น "3 บน", "3 โต๊ด", "2 บน", "2 ล่าง", "วิ่งบน", "วิ่งล่าง")
+    - "number": ตัวเลขที่แทง (เช่น "123", "89")
+    - "price": ราคาที่แทง (ตัวเลขเท่านั้น)
+    
+    กฎเพิ่มเติม:
+    1. หากเจอคำว่า "บล" หรือ "x" ให้แยกเป็น 2 รายการ เช่น 89 บล 100 ให้แยกเป็น "2 บน" เลข 89 ราคา 100 และ "2 ล่าง" เลข 89 ราคา 100
+    2. ห้ามมีคำอธิบายอื่นนอกเหนือจากโครงสร้าง JSON
+    3. ตัวอย่างผลลัพธ์: [{"type": "3 บน", "number": "123", "price": 50}, {"type": "2 บน", "number": "89", "price": 20}]`;
+
+    const imageParts = [
+      { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+    ];
+
+    const result = await model.generateContent([prompt, ...imageParts]);
+    const responseText = result.response.text();
+    
+    // ทำความสะอาดข้อความ เผื่อ AI ส่ง ```json มาครอบไว้
+    const cleanJsonText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsedData = JSON.parse(cleanJsonText);
+
+    res.json({ status: 'success', data: parsedData });
+  } catch (error) {
+    console.error("OCR Error:", error);
+    res.status(500).json({ status: 'error', message: 'AI ไม่สามารถอ่านข้อมูลได้ หรือรูปภาพไม่ชัดเจน' });
+  }
+});
 const PORT = process.env.PORT || 3000;
 // 🟢 4. รันด้วย server.listen แทน app.listen
 server.listen(PORT, () => console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`));
