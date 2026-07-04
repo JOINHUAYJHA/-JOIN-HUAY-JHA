@@ -303,11 +303,10 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
        
     ห้ามอธิบายความ ห้ามมีข้อความอื่นใดๆ ตอบกลับมาแค่ JSON Array เท่านั้น`;
 
-    // 🟢 1. เปลี่ยน URL เป็นรุ่น 1.0 Pro Vision ที่รองรับทุกบัญชี
-// // 🟢 1. เปลี่ยนจาก v1beta เป็น v1 (เวอร์ชันหลักที่เสถียรและรองรับโมเดล Flash)
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+   // 🟢 1. กลับมาใช้ v1beta (เพราะ API Key ของคุณมองเห็นโมเดลในเวอร์ชันนี้ครับ)
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
     
-    // 🟢 2. ปรับโครงสร้างคำสั่งให้ตรงกับมาตรฐาน REST API ของ Google แป๊ะๆ
+    // 🟢 2. ส่งข้อมูลแบบคลีนๆ ไม่มี generationConfig กวนใจ
     const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -315,11 +314,10 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
             contents: [{
                 parts: [
                     { text: prompt },
-                    // ใช้ inline_data (มีขีดล่าง) ตามคู่มือ API ของ Google
                     { inline_data: { mime_type: mimeType, data: base64Data } } 
                 ]
-            }],
-        })
+            }]
+        }) 
     });
     const data = await response.json();
 
