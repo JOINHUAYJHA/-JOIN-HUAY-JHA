@@ -197,7 +197,7 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
     const targetBillId = req.params.billId;
     const { customerName, items, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
     
-    // 🟢 เติม 3 บรรทัดนี้เข้าไป ป้องกันเซิร์ฟเวอร์พังตอนแก้ไขบิล
+    // 🟢 ป้องกันเซิร์ฟเวอร์พังตอนแก้ไขบิล
     if (!items || !Array.isArray(items)) {
       return res.status(400).json({ status: 'error', message: 'ข้อมูลรายการแทงไม่ถูกต้อง' });
     }
@@ -206,7 +206,12 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
 
     let newTotal = 0; let validItems = [];
     items.forEach(i => {
-// ... โค้ดเดิมยาวไปจนจบ ...
+      let p = parseFloat(i.price);
+      if (!isNaN(p) && p > 0) {
+        newTotal += p;
+        validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-" });
+      }
+    });
 
     await Bill.findOneAndUpdate({ billId: targetBillId }, { customerName: cName, items: validItems, totalAmount: newTotal });
     await new AuditLog({ action: 'EDIT_BILL', billId: targetBillId, details: `ยอดใหม่: ${newTotal} ฿`, deviceInfo, location }).save();
