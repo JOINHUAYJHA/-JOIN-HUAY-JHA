@@ -258,16 +258,71 @@ app.post('/api/migrate', checkAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
+// ==========================================
+// 🕒 สรุปยอดขายและกำไรประจำวัน (ตอน 23:59 น.)
+// ==========================================
 cron.schedule('59 23 * * *', async () => {
   try {
-    const today = new Date(); today.setHours(0, 0, 0, 0); 
+    const today = new Date(); 
+    today.setHours(0, 0, 0, 0);
+    
+    // 1. คำนวณยอดขายจากบิลของวันนี้
     const billsToday = await Bill.find({ createdAt: { $gte: today } });
-    let totalSales = 0; let totalItems = 0;
-    billsToday.forEach(b => { totalSales += b.totalAmount; totalItems += b.items.length; });
+    let totalSales = 0; 
+    let totalItems = 0;
+    billsToday.forEach(b => { 
+        totalSales += b.totalAmount; 
+        totalItems += b.items.length; 
+    });
+
     if (billsToday.length > 0) {
-      sendTelegramNotify(`📊 <b>สรุปยอดขายประจำวัน!</b> 📊\n📅 วันที่: ${new Date().toLocaleDateString('th-TH')}\n🧾 จำนวนบิล: ${billsToday.length} บิล\n📝 จำนวนรายการ: ${totalItems} รายการ\n💰 <b>ยอดขายรวม: ${totalSales.toLocaleString()} บาท</b>\n✅ พักผ่อนได้เลยครับ!`);
+      // 2. ดึงข้อมูลยอดจ่าย (ถูกรางวัล) จาก AppData
+      const payoutDataRecord = await AppData.findOne({ key: 'payoutData' });
+      let totalPayout = 0;
+      
+      if (payoutDataRecord && payoutDataRecord.value) {
+        // สร้าง String วันที่ในรูปแบบ YYYY-MM-DD เพื่อไปเทียบกับ Key ในฐานข้อมูล
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        const dateString = `${yyyy}-${mm}-${dd}`;
+
+        // วนลูปหายอดจ่ายเฉพาะของวันนี้
+        const payoutObj = payoutDataRecord.value;
+        for (let key in payoutObj) {
+          if (key.includes(`(${dateString})`)) {
+            totalPayout += payoutObj[key];
+          }
+        }
+      }
+
+      // 3. คำนวณกำไรสุทธิ
+      let netProfit = totalSales - totalPayout;
+      let profitEmoji = netProfit >= 0 ? '🟢' : '🔴';
+
+      // 4. สร้างข้อความแจ้งเตือนโฉมใหม่
+      let msg = `📊 <b>สรุปยอดประจำวัน!</b> 📊\n`;
+      msg += `📅 วันที่: ${new Date().toLocaleDateString('th-TH')}\n`;
+      msg += `🧾 จำนวนบิล: ${billsToday.length} บิล (${totalItems} รายการ)\n`;
+      msg += `━━━━━━━━━━━━━━\n`;
+      msg += `📈 <b>ยอดขายรวม:</b> ${totalSales.toLocaleString()} ฿\n`;
+      
+      if (totalPayout > 0) {
+        msg += `💸 <b>ลูกค้าถูกรางวัล:</b> -${totalPayout.toLocaleString()} ฿\n`;
+        msg += `━━━━━━━━━━━━━━\n`;
+        msg += `${profitEmoji} <b>กำไรสุทธิ:</b> ${netProfit.toLocaleString()} ฿\n`;
+      } else {
+        msg += `━━━━━━━━━━━━━━\n`;
+        msg += `🟢 <b>กำไรสุทธิ:</b> ${netProfit.toLocaleString()} ฿ (ไม่มีรายจ่าย)\n`;
+      }
+      
+      msg += `✅ พักผ่อนได้เลยครับ!`;
+
+      sendTelegramNotify(msg);
     }
-  } catch (error) { console.error("Cron Job Error:", error); }
+  } catch (error) { 
+      console.error("Cron Job Error:", error); 
+  }
 }, { scheduled: true, timezone: "Asia/Bangkok" });
 
 // ==========================================
