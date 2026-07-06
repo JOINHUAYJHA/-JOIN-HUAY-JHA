@@ -13,6 +13,10 @@ const io = new Server(server, {
 });
 
 app.use(cors());
+// สร้างเส้นทางสำหรับปลุกเซิร์ฟเวอร์
+app.get('/keep-awake', (req, res) => {
+  res.status(200).send('I am awake!');
+});
 app.use(express.json({ limit: '50mb' }));
 
 // ==========================================
@@ -25,11 +29,15 @@ mongoose.connect(process.env.MONGODB_URI)
 // ==========================================
 // 📢 ระบบส่งแจ้งเตือน Telegram
 // ==========================================
+// ==========================================
+// 📢 ระบบส่งแจ้งเตือน Telegram
+// ==========================================
 const sendTelegramNotify = async (message) => {
-  const token = (process.env.TELEGRAM_BOT_TOKEN || "8727691071:AAFI2lvvv5BIwuVa-qpqxFMRiGFGXHFGWPY").trim();
-  const chatId = (process.env.TELEGRAM_CHAT_ID || "-5311910671").trim();
+  // 🟢 ลบ string ตัวเลขยาวๆ ออกไป ให้เหลือแค่นี้ครับ
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
   
-  if (!token || !chatId || token.includes('ใส่_')) return; 
+  if (!token || !chatId) return; 
   try {
     const url = `https://api.telegram.org/bot${token}/sendMessage`;
     const response = await fetch(url, {
@@ -144,7 +152,14 @@ app.get('/api/bills', checkAuth, async (req, res) => {
 app.post('/api/bills', checkAuth, async (req, res) => {
   try {
     const { customerName, items, timestamp, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
+    
+    // 🟢 เพิ่มบรรทัดนี้: ป้องกันเซิร์ฟเวอร์พังถ้าไม่มี items ส่งมา
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ status: 'error', message: 'ข้อมูลรายการแทงไม่ถูกต้อง' });
+    }
+
     const customerNameNew = customerName || "ลูกค้าทั่วไป";
+    // ... โค้ดที่เหลือเหมือนเดิม ...
     const d = timestamp ? new Date(timestamp) : new Date();
     const shortDate = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0');
     
