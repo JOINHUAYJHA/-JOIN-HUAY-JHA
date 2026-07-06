@@ -85,12 +85,24 @@ const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 // ==========================================
 // 🚀 API ROUTES (ระบบจัดการบิล)
 // ==========================================
+// ==========================================
+// 🔐 API ยืนยันตัวตน (Login)
+// ==========================================
 app.post('/api/verify_pin', (req, res) => {
   const { pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
+  
+  // จัดฟอร์แมตเวลาให้เป็นเวลาไทย
+  const loginTime = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+
   if (pin === process.env.ADMIN_PIN) {
+    // 🟢 เพิ่มแจ้งเตือนเมื่อล็อกอินสำเร็จ
+    sendTelegramNotify(`✅ <b>เข้าสู่ระบบสำเร็จ! (Login)</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
+    
     res.json({ status: 'success', message: 'Login successful' });
   } else {
-    sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามล็อกอินแต่ <b>ใส่ PIN ผิด</b>\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
+    // 🔴 แจ้งเตือนเมื่อล็อกอินผิด (ของเดิม)
+    sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามล็อกอินแต่ <b>ใส่ PIN ผิด</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
+    
     res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
   }
 });
