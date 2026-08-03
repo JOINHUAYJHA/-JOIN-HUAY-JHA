@@ -144,7 +144,8 @@ app.get('/api/bills', checkAuth, async (req, res) => {
       b.items.forEach(i => {
         flatData.push({
           category: i.category, billId: b.billId, timestamp: b.createdAt,
-          customer: b.customerName, type: i.type, number: i.number, price: i.price, memo: i.memo
+          customer: b.customerName, type: i.type, number: i.number, price: i.price, memo: i.memo,
+          realTimestamp: i.realTimestamp // 🟢 เพิ่มข้อมูลนี้เพื่อให้หลังบ้านดึงไปโชว์ป้ายเหลืองได้
         });
       });
     });
@@ -177,7 +178,7 @@ app.post('/api/bills', checkAuth, async (req, res) => {
       let p = parseFloat(i.price);
       if (!isNaN(p) && p > 0) {
         totalPrice += p;
-        validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-" });
+        validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-", realTimestamp: i.realTimestamp }); // 🟢 เพิ่มรับค่าเวลาซื้อจริง        
       }
     });
 
@@ -212,7 +213,7 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
       let p = parseFloat(i.price);
       if (!isNaN(p) && p > 0) {
         newTotal += p;
-        validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-" });
+      validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-", realTimestamp: i.realTimestamp }); // 🟢 เพิ่มรับค่าเวลาซื้อจริง        
       }
     });
 
