@@ -74,7 +74,10 @@ const checkAuth = (req, res, next) => {
 // ==========================================
 // 📦 โครงสร้างฐานข้อมูล
 // ==========================================
-const itemSchema = new mongoose.Schema({ category: String, type: String, number: String, price: Number, memo: String });
+// ==========================================
+// 📦 โครงสร้างฐานข้อมูล
+// ==========================================
+const itemSchema = new mongoose.Schema({ category: String, type: String, number: String, price: Number, memo: String, realTimestamp: Number });
 const billSchema = new mongoose.Schema({
   billId: { type: String, required: true, unique: true },
   customerName: { type: String, default: 'ลูกค้าทั่วไป' },
