@@ -131,9 +131,16 @@ app.post('/api/appdata', checkAuth, async (req, res) => {
     try {
         const { key, value } = req.body;
         if (!key) return res.status(400).json({ status: 'error', message: 'กรุณาระบุชื่อคีย์' });
+        
         await AppData.findOneAndUpdate({ key: key }, { value: value }, { upsert: true, new: true });
+
+        // 🟢 เพิ่มบรรทัดนี้ลงไป: เพื่อส่งสัญญาณแจ้งทุกเครื่องให้ดึงการตั้งค่าใหม่ไปวาดบนหน้าจอ
+        io.emit('data_updated', { message: `อัปเดตข้อมูล ${key} แบบ Real-time 🔄` });
+
         res.json({ status: 'success', message: 'ซิงค์ข้อมูลสำเร็จ' });
-    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
+    } catch (error) { 
+        res.status(500).json({ status: 'error', message: error.message }); 
+    }
 });
 
 app.get('/api/bills', checkAuth, async (req, res) => {
