@@ -29,11 +29,7 @@ mongoose.connect(process.env.MONGODB_URI)
 // ==========================================
 // 📢 ระบบส่งแจ้งเตือน Telegram
 // ==========================================
-// ==========================================
-// 📢 ระบบส่งแจ้งเตือน Telegram
-// ==========================================
 const sendTelegramNotify = async (message) => {
-  // 🟢 ลบ string ตัวเลขยาวๆ ออกไป ให้เหลือแค่นี้ครับ
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   
@@ -74,9 +70,6 @@ const checkAuth = (req, res, next) => {
 // ==========================================
 // 📦 โครงสร้างฐานข้อมูล
 // ==========================================
-// ==========================================
-// 📦 โครงสร้างฐานข้อมูล
-// ==========================================
 const itemSchema = new mongoose.Schema({ category: String, type: String, number: String, price: Number, memo: String, realTimestamp: Number });
 const billSchema = new mongoose.Schema({
   billId: { type: String, required: true, unique: true },
@@ -96,9 +89,7 @@ const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 // ==========================================
 // 🚀 API ROUTES (ระบบจัดการบิล)
 // ==========================================
-// ==========================================
 // 🔐 API ยืนยันตัวตน (Login)
-// ==========================================
 app.post('/api/verify_pin', (req, res) => {
   const { pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
   
@@ -111,7 +102,7 @@ app.post('/api/verify_pin', (req, res) => {
     
     res.json({ status: 'success', message: 'Login successful' });
   } else {
-    // 🔴 แจ้งเตือนเมื่อล็อกอินผิด (ของเดิม)
+    // 🔴 แจ้งเตือนเมื่อล็อกอินผิด
     sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามล็อกอินแต่ <b>ใส่ PIN ผิด</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
     
     res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
@@ -127,20 +118,18 @@ app.get('/api/appdata', checkAuth, async (req, res) => {
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
+// 🟢 [แก้ไข] เพิ่มการส่งสัญญาณ io.emit เพื่อซิงค์ข้อมูลทุกเครื่องแบบ Real-time
 app.post('/api/appdata', checkAuth, async (req, res) => {
     try {
         const { key, value } = req.body;
         if (!key) return res.status(400).json({ status: 'error', message: 'กรุณาระบุชื่อคีย์' });
-        
         await AppData.findOneAndUpdate({ key: key }, { value: value }, { upsert: true, new: true });
-
-        // 🟢 เพิ่มบรรทัดนี้ลงไป: เพื่อส่งสัญญาณแจ้งทุกเครื่องให้ดึงการตั้งค่าใหม่ไปวาดบนหน้าจอ
+        
+        // ส่งสัญญาณบอกทุกเครื่องให้รู้ว่ามีการอัปเดต
         io.emit('data_updated', { message: `อัปเดตข้อมูล ${key} แบบ Real-time 🔄` });
 
         res.json({ status: 'success', message: 'ซิงค์ข้อมูลสำเร็จ' });
-    } catch (error) { 
-        res.status(500).json({ status: 'error', message: error.message }); 
-    }
+    } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
 app.get('/api/bills', checkAuth, async (req, res) => {
@@ -152,7 +141,7 @@ app.get('/api/bills', checkAuth, async (req, res) => {
         flatData.push({
           category: i.category, billId: b.billId, timestamp: b.createdAt,
           customer: b.customerName, type: i.type, number: i.number, price: i.price, memo: i.memo,
-          realTimestamp: i.realTimestamp // 🟢 เพิ่มข้อมูลนี้เพื่อให้หลังบ้านดึงไปโชว์ป้ายเหลืองได้
+          realTimestamp: i.realTimestamp 
         });
       });
     });
@@ -164,13 +153,11 @@ app.post('/api/bills', checkAuth, async (req, res) => {
   try {
     const { customerName, items, timestamp, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
     
-    // 🟢 เพิ่มบรรทัดนี้: ป้องกันเซิร์ฟเวอร์พังถ้าไม่มี items ส่งมา
     if (!items || !Array.isArray(items)) {
       return res.status(400).json({ status: 'error', message: 'ข้อมูลรายการแทงไม่ถูกต้อง' });
     }
 
     const customerNameNew = customerName || "ลูกค้าทั่วไป";
-    // ... โค้ดที่เหลือเหมือนเดิม ...
     const d = timestamp ? new Date(timestamp) : new Date();
     const shortDate = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0');
     
@@ -185,7 +172,7 @@ app.post('/api/bills', checkAuth, async (req, res) => {
       let p = parseFloat(i.price);
       if (!isNaN(p) && p > 0) {
         totalPrice += p;
-        validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-", realTimestamp: i.realTimestamp }); // 🟢 เพิ่มรับค่าเวลาซื้อจริง        
+        validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-", realTimestamp: i.realTimestamp });        
       }
     });
 
@@ -208,7 +195,6 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
     const targetBillId = req.params.billId;
     const { customerName, items, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
     
-    // 🟢 ป้องกันเซิร์ฟเวอร์พังตอนแก้ไขบิล
     if (!items || !Array.isArray(items)) {
       return res.status(400).json({ status: 'error', message: 'ข้อมูลรายการแทงไม่ถูกต้อง' });
     }
@@ -220,7 +206,7 @@ app.put('/api/bills/:billId', checkAuth, async (req, res) => {
       let p = parseFloat(i.price);
       if (!isNaN(p) && p > 0) {
         newTotal += p;
-      validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-", realTimestamp: i.realTimestamp }); // 🟢 เพิ่มรับค่าเวลาซื้อจริง        
+      validItems.push({ category: i.category || "ข้อมูลบิลทั่วไป", type: i.type, number: String(i.number).replace(/^'/, '').trim(), price: p, memo: i.memo || "-", realTimestamp: i.realTimestamp });        
       }
     });
 
@@ -303,6 +289,21 @@ app.post('/api/migrate', checkAuth, async (req, res) => {
 });
 
 // ==========================================
+// 📢 [เพิ่มใหม่] API สำหรับรับข้อความแจ้งเตือนแบบ Custom (เช่น ตรวจรางวัลเสร็จ)
+// ==========================================
+app.post('/api/notify', checkAuth, async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (message) {
+      await sendTelegramNotify(message);
+    }
+    res.json({ status: 'success' });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+// ==========================================
 // 🕒 สรุปยอดขายและกำไรประจำวัน (ตอน 23:59 น.)
 // ==========================================
 cron.schedule('59 23 * * *', async () => {
@@ -370,9 +371,6 @@ cron.schedule('59 23 * * *', async () => {
 }, { scheduled: true, timezone: "Asia/Bangkok" });
 
 // ==========================================
-// 🤖 API AI SCAN โพยหวย (ระบบสลับโมเดลอัตโนมัติ)
-// ==========================================
-// ==========================================
 // 🤖 API AI SCAN โพยหวย (เปลี่ยนมาใช้ OpenAI - GPT-4o-mini)
 // ==========================================
 app.post('/api/scan-bill', checkAuth, async (req, res) => {
@@ -380,12 +378,10 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
     const { imageBase64 } = req.body;
     if (!imageBase64) return res.status(400).json({ status: 'error', message: 'ไม่พบรูปภาพ' });
 
-    // 🟢 เปลี่ยนมาเช็ค Key ของ OpenAI แทน
     if (!process.env.OPENAI_API_KEY) {
         return res.status(500).json({ status: 'error', message: 'ยังไม่ได้ตั้งค่า OPENAI_API_KEY ในระบบหลังบ้าน' });
     }
 
-    // จัดรูปแบบรูปภาพให้ OpenAI อ่านได้
     const imageUrl = imageBase64.startsWith('data:image') 
         ? imageBase64 
         : `data:image/jpeg;base64,${imageBase64}`;
@@ -402,7 +398,6 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
 
     const url = 'https://api.openai.com/v1/chat/completions';
     
-    // 🟢 ยิงคำสั่งตรงไปที่ OpenAI API
     const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -431,7 +426,6 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
         return res.status(500).json({ status: 'error', message: data.error?.message || 'OpenAI ปฏิเสธการเชื่อมต่อ' });
     }
 
-    // 🟢 สกัดเอา JSON จากคำตอบของ ChatGPT
     const responseText = data.choices[0].message.content;
     const cleanJsonText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsedData = JSON.parse(cleanJsonText);
@@ -444,10 +438,15 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`));
 
-// ปลุกตัวเองทุกๆ 14 นาที (14 * 60 * 1000 มิลลิวินาที)
-const url = "https://join-huay-jha.onrender.com/keep-awake"; // เปลี่ยนเป็น URL จริงของคุณ
+// แจ้งเตือนเมื่อ Server ตื่น/เปิดขึ้นมาใหม่
+server.listen(PORT, () => {
+  console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`);
+  sendTelegramNotify(`🚀 <b>System Online!</b>\nเซิร์ฟเวอร์ระบบ Super Dashboard Pro เริ่มทำงานและพร้อมรับโพยแล้วครับ!`);
+});
+
+// ปลุกตัวเองทุกๆ 14 นาที
+const url = "https://join-huay-jha.onrender.com/keep-awake";
 setInterval(async () => {
   try {
     const response = await fetch(url);
