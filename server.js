@@ -51,7 +51,7 @@ const sendTelegramNotify = async (message) => {
 };
 
 // ==========================================
-// 🔐 ระบบยืนยันตัวตน
+// 🔐 ระบบยืนยันตัวตนพื้นฐาน (Token)
 // ==========================================
 const checkAuth = (req, res, next) => {
   const pin = req.headers['authorization'];
@@ -87,28 +87,68 @@ const AppData = mongoose.model('AppData', appDataSchema);
 const AuditLog = mongoose.model('AuditLog', auditLogSchema); 
 
 // ==========================================
-// 🚀 API ROUTES (ระบบจัดการบิล)
+// 🔐 API ยืนยันตัวตน (Login + ระบบ OTP)
 // ==========================================
-// 🔐 API ยืนยันตัวตน (Login)
-app.post('/api/verify_pin', (req, res) => {
+// ตัวแปรสำหรับเก็บ OTP ชั่วคราวบนเซิร์ฟเวอร์
+let currentOTP = null;
+let otpExpireTime = null;
+
+app.post('/api/verify_pin', async (req, res) => {
   const { pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
-  
-  // จัดฟอร์แมตเวลาให้เป็นเวลาไทย
   const loginTime = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 
   if (pin === process.env.ADMIN_PIN) {
-    // 🟢 เพิ่มแจ้งเตือนเมื่อล็อกอินสำเร็จ
-    sendTelegramNotify(`✅ <b>เข้าสู่ระบบสำเร็จ! (Login)</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
-    
-    res.json({ status: 'success', message: 'Login successful' });
+    // 🟢 สร้างรหัส OTP 6 หลัก
+    currentOTP = Math.floor(100000 + Math.random() * 900000).toString();
+    otpExpireTime = Date.now() + 5 * 60 * 1000; // ให้เวลา 5 นาที
+
+    // ส่ง OTP เข้า Telegram
+    let msg = `🔐 <b>รหัส OTP สำหรับเข้าสู่ระบบ</b>\n`;
+    msg += `🔑 รหัสของคุณคือ: <b>${currentOTP}</b>\n`;
+    msg += `⏳ (รหัสมีอายุ 5 นาที)\n`;
+    msg += `📱 อุปกรณ์: ${deviceInfo}\n`;
+    msg += `📍 พิกัด: ${location}`;
+    await sendTelegramNotify(msg);
+
+    // บอกหน้าเว็บว่ารหัสถูก ให้เด้งกล่องถาม OTP ต่อ
+    res.json({ status: 'require_otp', message: 'ส่งรหัส OTP ไปที่ Telegram แล้ว' });
   } else {
     // 🔴 แจ้งเตือนเมื่อล็อกอินผิด
     sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามล็อกอินแต่ <b>ใส่ PIN ผิด</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
-    
     res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
   }
 });
 
+// 🟢 API สำหรับตรวจสอบรหัส OTP จากหน้าเว็บ
+app.post('/api/verify_otp', (req, res) => {
+  const { otp, pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
+  const loginTime = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+
+  // เช็ค PIN ซ้ำอีกรอบเพื่อความปลอดภัย
+  if (pin !== process.env.ADMIN_PIN) {
+      return res.status(401).json({ status: 'error', message: 'PIN ไม่ถูกต้อง' });
+  }
+
+  // เช็คว่า OTP มีอยู่และยังไม่หมดอายุ
+  if (!currentOTP || Date.now() > otpExpireTime) {
+    return res.status(400).json({ status: 'error', message: 'รหัส OTP หมดอายุ หรือยังไม่ได้ขอรหัสใหม่' });
+  }
+
+  if (otp === currentOTP) {
+    currentOTP = null; // เคลียร์ OTP ทิ้งเมื่อใช้สำเร็จ
+    otpExpireTime = null;
+    
+    sendTelegramNotify(`✅ <b>เข้าสู่ระบบสำเร็จ! (ผ่าน OTP)</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
+    res.json({ status: 'success', message: 'เข้าสู่ระบบสมบูรณ์' });
+  } else {
+    sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามกรอก OTP ผิด\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}`);
+    res.status(401).json({ status: 'error', message: 'รหัส OTP ไม่ถูกต้อง' });
+  }
+});
+
+// ==========================================
+// 🚀 API ROUTES (ระบบจัดการบิล)
+// ==========================================
 app.get('/api/appdata', checkAuth, async (req, res) => {
     try {
         const allData = await AppData.find();
@@ -118,14 +158,12 @@ app.get('/api/appdata', checkAuth, async (req, res) => {
     } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// 🟢 [แก้ไข] เพิ่มการส่งสัญญาณ io.emit เพื่อซิงค์ข้อมูลทุกเครื่องแบบ Real-time
 app.post('/api/appdata', checkAuth, async (req, res) => {
     try {
         const { key, value } = req.body;
         if (!key) return res.status(400).json({ status: 'error', message: 'กรุณาระบุชื่อคีย์' });
         await AppData.findOneAndUpdate({ key: key }, { value: value }, { upsert: true, new: true });
         
-        // ส่งสัญญาณบอกทุกเครื่องให้รู้ว่ามีการอัปเดต
         io.emit('data_updated', { message: `อัปเดตข้อมูล ${key} แบบ Real-time 🔄` });
 
         res.json({ status: 'success', message: 'ซิงค์ข้อมูลสำเร็จ' });
@@ -288,9 +326,6 @@ app.post('/api/migrate', checkAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
 });
 
-// ==========================================
-// 📢 [เพิ่มใหม่] API สำหรับรับข้อความแจ้งเตือนแบบ Custom (เช่น ตรวจรางวัลเสร็จ)
-// ==========================================
 app.post('/api/notify', checkAuth, async (req, res) => {
   try {
     const { message } = req.body;
@@ -326,13 +361,11 @@ cron.schedule('59 23 * * *', async () => {
       let totalPayout = 0;
       
       if (payoutDataRecord && payoutDataRecord.value) {
-        // สร้าง String วันที่ในรูปแบบ YYYY-MM-DD เพื่อไปเทียบกับ Key ในฐานข้อมูล
         const yyyy = today.getFullYear();
         const mm = String(today.getMonth() + 1).padStart(2, '0');
         const dd = String(today.getDate()).padStart(2, '0');
         const dateString = `${yyyy}-${mm}-${dd}`;
 
-        // วนลูปหายอดจ่ายเฉพาะของวันนี้
         const payoutObj = payoutDataRecord.value;
         for (let key in payoutObj) {
           if (key.includes(`(${dateString})`)) {
@@ -345,7 +378,6 @@ cron.schedule('59 23 * * *', async () => {
       let netProfit = totalSales - totalPayout;
       let profitEmoji = netProfit >= 0 ? '🟢' : '🔴';
 
-      // 4. สร้างข้อความแจ้งเตือนโฉมใหม่
       let msg = `📊 <b>สรุปยอดประจำวัน!</b> 📊\n`;
       msg += `📅 วันที่: ${new Date().toLocaleDateString('th-TH')}\n`;
       msg += `🧾 จำนวนบิล: ${billsToday.length} บิล (${totalItems} รายการ)\n`;
@@ -439,13 +471,11 @@ app.post('/api/scan-bill', checkAuth, async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-// แจ้งเตือนเมื่อ Server ตื่น/เปิดขึ้นมาใหม่
 server.listen(PORT, () => {
   console.log(`🚀 Server + WebSockets เปิดรันอยู่ที่พอร์ต ${PORT}`);
   sendTelegramNotify(`🚀 <b>System Online!</b>\nเซิร์ฟเวอร์ระบบ Super Dashboard Pro เริ่มทำงานและพร้อมรับโพยแล้วครับ!`);
 });
 
-// ปลุกตัวเองทุกๆ 14 นาที
 const url = "https://join-huay-jha.onrender.com/keep-awake";
 setInterval(async () => {
   try {
