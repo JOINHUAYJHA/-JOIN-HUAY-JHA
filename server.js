@@ -339,6 +339,55 @@ app.post('/api/notify', checkAuth, async (req, res) => {
 });
 
 // ==========================================
+// 🔍 API สำหรับตรวจสอบบิล (Check Bill 4 ตัวท้ายสำหรับลูกค้า)
+// ==========================================
+app.get('/api/check-bill/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    
+    // 1. ค้นหาบิลจากฐานข้อมูลที่รหัสลงท้ายด้วย 4 ตัวที่ลูกค้ากรอก
+    const bill = await Bill.findOne({ billId: new RegExp(code + '$', 'i') });
+    
+    if (!bill) {
+      return res.json({ status: 'not_found' });
+    }
+
+    // 2. ดึงข้อมูลประวัติการถูกรางวัลจาก AppData (ที่แอดมินเคยกดตรวจผลไว้)
+    const winnerRecord = await AppData.findOne({ key: 'winnersData' });
+    let isWin = false;
+    let totalWinAmount = 0;
+
+    // 3. ตรวจสอบว่าบิลนี้ มีอยู่ในรายชื่อคนที่ถูกรางวัลหรือไม่
+    if (winnerRecord && winnerRecord.value) {
+        const winnersData = winnerRecord.value;
+        for (let dateKey in winnersData) {
+            let winnersList = winnersData[dateKey];
+            if (Array.isArray(winnersList)) {
+                winnersList.forEach(winItem => {
+                    // ถ้าบิลนี้ตรงกับรายการที่ถูกรางวัล ให้นำยอดที่ได้มาบวกเพิ่ม
+                    if (winItem.billId === bill.billId) {
+                        isWin = true;
+                        totalWinAmount += Number(winItem.payout || 0);
+                    }
+                });
+            }
+        }
+    }
+
+    // 4. ส่งผลลัพธ์กลับไปให้หน้าเว็บ
+    if (isWin) {
+      res.json({ status: 'win', amount: totalWinAmount });
+    } else {
+      res.json({ status: 'lose' });
+    }
+    
+  } catch (error) {
+    console.error("Check Bill Error:", error);
+    res.status(500).json({ status: 'error', message: 'ระบบตรวจสอบขัดข้อง' });
+  }
+});
+
+// ==========================================
 // 🕒 สรุปยอดขายและกำไรประจำวัน (ตอน 23:59 น.)
 // ==========================================
 cron.schedule('59 23 * * *', async () => {
