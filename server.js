@@ -75,6 +75,9 @@ const billSchema = new mongoose.Schema({
   billId: { type: String, required: true, unique: true },
   customerName: { type: String, default: 'ลูกค้าทั่วไป' },
   totalAmount: { type: Number, required: true },
+  discountPercent: { type: Number, default: 0 }, 
+  discountAmount: { type: Number, default: 0 },
+  netAmount: { type: Number, default: 0 },
   items: [itemSchema],
   createdAt: { type: Date, default: Date.now }
 });
@@ -94,11 +97,9 @@ app.post('/api/verify_pin', async (req, res) => {
   const loginTime = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 
   if (pin === process.env.ADMIN_PIN) {
-    // 🟢 ถ้า PIN ถูกต้อง ให้เข้าสู่ระบบได้เลย
     sendTelegramNotify(`✅ <b>เข้าสู่ระบบสำเร็จ!</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
     res.json({ status: 'success', message: 'เข้าสู่ระบบสมบูรณ์' });
   } else {
-    // 🔴 แจ้งเตือนเมื่อล็อกอินผิด
     sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามล็อกอินแต่ <b>ใส่ PIN ผิด</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
     res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
   }
@@ -137,7 +138,8 @@ app.get('/api/bills', checkAuth, async (req, res) => {
         flatData.push({
           category: i.category, billId: b.billId, timestamp: b.createdAt,
           customer: b.customerName, type: i.type, number: i.number, price: i.price, memo: i.memo,
-          realTimestamp: i.realTimestamp 
+          realTimestamp: i.realTimestamp,
+          discountAmount: b.discountAmount // 👈 ส่งส่วนลดกลับไปที่หน้าเว็บ
         });
       });
     });
@@ -147,7 +149,7 @@ app.get('/api/bills', checkAuth, async (req, res) => {
 
 app.post('/api/bills', checkAuth, async (req, res) => {
   try {
-    const { customerName, items, timestamp, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
+    const { customerName, items, timestamp, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด", discountPercent, discountAmount, netAmount } = req.body;
     
     if (!items || !Array.isArray(items)) {
       return res.status(400).json({ status: 'error', message: 'ข้อมูลรายการแทงไม่ถูกต้อง' });
@@ -174,13 +176,23 @@ app.post('/api/bills', checkAuth, async (req, res) => {
 
     if (validItems.length === 0) throw new Error("ไม่มีรายการที่สามารถบันทึกได้");
 
-    const newBill = new Bill({ billId: billIdNew, customerName: customerNameNew, totalAmount: totalPrice, items: validItems, createdAt: d });
+    // บันทึกบิลพร้อมส่วนลด
+    const newBill = new Bill({ 
+      billId: billIdNew, 
+      customerName: customerNameNew, 
+      totalAmount: totalPrice, 
+      discountPercent: discountPercent || 0,
+      discountAmount: discountAmount || 0,
+      netAmount: netAmount || totalPrice,
+      items: validItems, 
+      createdAt: d 
+    });
     await newBill.save();
 
-    let msg = `🧾 <b>โพยใหม่เข้าสู่ระบบ!</b>\n👤 ลูกค้า: ${customerNameNew}\n🏷️ รหัส: ${billIdNew} (${validItems.length} รายการ)\n💰 ยอดรวม: ${totalPrice.toLocaleString()} ฿\n`;
+    let msg = `🧾 <b>โพยใหม่เข้าสู่ระบบ!</b>\n👤 ลูกค้า: ${customerNameNew}\n🏷️ รหัส: ${billIdNew} (${validItems.length} รายการ)\n💰 ยอดรวม: ${totalPrice.toLocaleString()} ฿\n🎁 ส่วนลด: ${(discountAmount || 0).toLocaleString()} ฿\n💵 ยอดสุทธิ: ${(netAmount || totalPrice).toLocaleString()} ฿\n`;
     sendTelegramNotify(msg);
 
-    io.emit('data_updated', { message: `📥 มีโพยใหม่เข้า: ${customerNameNew} (${totalPrice.toLocaleString()} ฿)` });
+    io.emit('data_updated', { message: `📥 มีโพยใหม่เข้า: ${customerNameNew} (${(netAmount || totalPrice).toLocaleString()} ฿)` });
 
     res.json({ status: 'success', billId: billIdNew, timestamp: d });
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
@@ -312,8 +324,8 @@ app.get('/api/check-bill/:code', async (req, res) => {
     const winnerRecord = await AppData.findOne({ key: 'winnersData' });
     let isWin = false;
     let totalWinAmount = 0;
-    let winDetails = []; // 🟢 เก็บรายละเอียดเลขที่ถูก
-    let winPeriod = "";  // 🟢 เก็บงวดวันที่
+    let winDetails = []; 
+    let winPeriod = "";  
 
     if (winnerRecord && winnerRecord.value) {
         const winnersData = winnerRecord.value;
@@ -325,7 +337,6 @@ app.get('/api/check-bill/:code', async (req, res) => {
                         isWin = true;
                         totalWinAmount += Number(winItem.payout || 0);
                         
-                        // ดึงข้อมูลวันที่และหมวดหมู่หวยจากคีย์ (เช่น "หวยลาว (2026-11-03)")
                         let match = dateKey.match(/(.+?) \((.+?)\)/);
                         if (match) {
                             winPeriod = `งวด ${match[2]} (${match[1]})`;
@@ -333,7 +344,6 @@ app.get('/api/check-bill/:code', async (req, res) => {
                             winPeriod = `งวด ${dateKey}`;
                         }
 
-                        // เก็บเลขที่ถูกและรูปแบบแทง (เช่น "2 บน [56]")
                         winDetails.push(`- ${winItem.type} [${winItem.number}]`);
                     }
                 });
@@ -345,8 +355,8 @@ app.get('/api/check-bill/:code', async (req, res) => {
       res.json({ 
           status: 'win', 
           amount: totalWinAmount,
-          period: winPeriod,         // 🟢 ส่งงวดที่ถูกกลับไป
-          details: winDetails        // 🟢 ส่งเลขที่ถูกกลับไป (Array)
+          period: winPeriod,         
+          details: winDetails        
       });
     } else {
       res.json({ status: 'lose' });
