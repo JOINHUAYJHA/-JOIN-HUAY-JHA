@@ -87,62 +87,20 @@ const AppData = mongoose.model('AppData', appDataSchema);
 const AuditLog = mongoose.model('AuditLog', auditLogSchema); 
 
 // ==========================================
-// 🔐 API ยืนยันตัวตน (Login + ระบบ OTP)
+// 🔐 API ยืนยันตัวตน (Login)
 // ==========================================
-// ตัวแปรสำหรับเก็บ OTP ชั่วคราวบนเซิร์ฟเวอร์
-let currentOTP = null;
-let otpExpireTime = null;
-
 app.post('/api/verify_pin', async (req, res) => {
   const { pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
   const loginTime = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 
   if (pin === process.env.ADMIN_PIN) {
-    // 🟢 สร้างรหัส OTP 6 หลัก
-    currentOTP = Math.floor(100000 + Math.random() * 900000).toString();
-    otpExpireTime = Date.now() + 5 * 60 * 1000; // ให้เวลา 5 นาที
-
-    // ส่ง OTP เข้า Telegram
-    let msg = `🔐 <b>รหัส OTP สำหรับเข้าสู่ระบบ</b>\n`;
-    msg += `🔑 รหัสของคุณคือ: <b>${currentOTP}</b>\n`;
-    msg += `⏳ (รหัสมีอายุ 5 นาที)\n`;
-    msg += `📱 อุปกรณ์: ${deviceInfo}\n`;
-    msg += `📍 พิกัด: ${location}`;
-    await sendTelegramNotify(msg);
-
-    // บอกหน้าเว็บว่ารหัสถูก ให้เด้งกล่องถาม OTP ต่อ
-    res.json({ status: 'require_otp', message: 'ส่งรหัส OTP ไปที่ Telegram แล้ว' });
+    // 🟢 ถ้า PIN ถูกต้อง ให้เข้าสู่ระบบได้เลย
+    sendTelegramNotify(`✅ <b>เข้าสู่ระบบสำเร็จ!</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
+    res.json({ status: 'success', message: 'เข้าสู่ระบบสมบูรณ์' });
   } else {
     // 🔴 แจ้งเตือนเมื่อล็อกอินผิด
     sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามล็อกอินแต่ <b>ใส่ PIN ผิด</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
     res.status(401).json({ status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' });
-  }
-});
-
-// 🟢 API สำหรับตรวจสอบรหัส OTP จากหน้าเว็บ
-app.post('/api/verify_otp', (req, res) => {
-  const { otp, pin, deviceInfo = "ไม่ทราบอุปกรณ์", location = "ไม่ทราบพิกัด" } = req.body;
-  const loginTime = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-
-  // เช็ค PIN ซ้ำอีกรอบเพื่อความปลอดภัย
-  if (pin !== process.env.ADMIN_PIN) {
-      return res.status(401).json({ status: 'error', message: 'PIN ไม่ถูกต้อง' });
-  }
-
-  // เช็คว่า OTP มีอยู่และยังไม่หมดอายุ
-  if (!currentOTP || Date.now() > otpExpireTime) {
-    return res.status(400).json({ status: 'error', message: 'รหัส OTP หมดอายุ หรือยังไม่ได้ขอรหัสใหม่' });
-  }
-
-  if (otp === currentOTP) {
-    currentOTP = null; // เคลียร์ OTP ทิ้งเมื่อใช้สำเร็จ
-    otpExpireTime = null;
-    
-    sendTelegramNotify(`✅ <b>เข้าสู่ระบบสำเร็จ! (ผ่าน OTP)</b>\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}\n📍 พิกัด: ${location}`);
-    res.json({ status: 'success', message: 'เข้าสู่ระบบสมบูรณ์' });
-  } else {
-    sendTelegramNotify(`⚠️ <b>แจ้งเตือนความปลอดภัย!</b>\n❌ มีคนพยายามกรอก OTP ผิด\n⏰ เวลา: ${loginTime}\n📱 อุปกรณ์: ${deviceInfo}`);
-    res.status(401).json({ status: 'error', message: 'รหัส OTP ไม่ถูกต้อง' });
   }
 });
 
