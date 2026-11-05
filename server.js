@@ -369,6 +369,103 @@ app.get('/api/check-bill/:code', async (req, res) => {
 });
 
 // ==========================================
+// 🏆 API สำหรับหน้าเช็คผลรางวัลผ่าน QR Code (มีสถานะ รอผล/ถูก/ไม่ถูก)
+// ==========================================
+app.get('/api/check_result', async (req, res) => {
+  try {
+    const billId = req.query.id;
+    if (!billId) {
+      return res.json({ status: 'error', message: 'ไม่พบรหัสบิล' });
+    }
+
+    // 1. ค้นหาข้อมูลบิลใน MongoDB
+    const targetBill = await Bill.findOne({ billId: billId });
+    if (!targetBill) {
+      return res.json({ status: 'error', message: 'ไม่พบข้อมูลบิลในระบบ' });
+    }
+
+    // 2. ดึงข้อมูลประวัติการประกาศผลรางวัลจาก AppData
+    const winnerRecord = await AppData.findOne({ key: 'winnersData' });
+    const winnersData = winnerRecord && winnerRecord.value ? winnerRecord.value : {};
+
+    let hasBeenDrawn = false; // ตัวแปรเช็คว่าหวยงวดนี้ถูกประกาศผลหรือยัง
+    let isWinner = false;     // ตัวแปรเช็คว่าบิลนี้ถูกรางวัลไหม
+    let winDetails = [];
+    let totalPayout = 0;
+
+    // หาหมวดหมู่ของบิล (หวยไทย, หวยลาว ฯลฯ)
+    const billCategory = targetBill.items.length > 0 ? targetBill.items[0].category : '';
+    
+    // แปลงวันที่ซื้อเป็นฟอร์แมต YYYY-MM-DD เพื่อเทียบกับวันที่ประกาศผล
+    // จัดการ Timezone ให้ตรงกับเวลาไทย (เผื่อ Server อยู่ต่างประเทศ)
+    const d = new Date(targetBill.createdAt);
+    const localDate = new Date(d.getTime() + (7 * 60 * 60 * 1000)); 
+    const billDateStr = localDate.toISOString().split('T')[0];
+
+    // 3. วนลูปตรวจสอบประวัติการประกาศผล
+    for (let dateKey in winnersData) {
+      let winnersInDraw = winnersData[dateKey];
+      
+      // เช็คว่าเคยมีการประกาศผลในหมวดและวันที่เดียวกับบิลนี้ไหม
+      // dateKey จะอยู่ในรูปแบบเช่น "หวยลาว (2026-11-05)"
+      if (dateKey.includes(billCategory) && dateKey.includes(billDateStr)) {
+        hasBeenDrawn = true; // ✔️ งวดนี้ประกาศผลแล้ว
+      }
+
+      // ถ้ามีคนถูกรางวัล ลองค้นหาดูว่ามีบิลนี้อยู่ในกลุ่มผู้โชคดีไหม
+      if (winnersInDraw && Array.isArray(winnersInDraw)) {
+        let thisBillWins = winnersInDraw.filter(w => w.billId === billId);
+        if (thisBillWins.length > 0) {
+          isWinner = true; // 🎉 บิลนี้ถูกรางวัล
+          winDetails = thisBillWins;
+          totalPayout = thisBillWins.reduce((sum, w) => sum + w.payout, 0);
+          hasBeenDrawn = true; // ยืนยันอีกรอบว่าถูกรางวัลแปลว่าต้องประกาศผลแล้วแน่ๆ
+          break;
+        }
+      }
+    }
+
+    // 4. กำหนดสถานะส่งกลับไปที่หน้าเว็บของลูกค้า
+    if (isWinner) {
+      // กรณีที่ 1: ถูกรางวัล
+      return res.json({
+        status: 'success',
+        data: {
+          status: 'win',
+          billId: billId,
+          customerName: targetBill.customerName,
+          winDetails: winDetails,
+          totalPayout: totalPayout
+        }
+      });
+    } else if (hasBeenDrawn) {
+      // กรณีที่ 2: ประกาศผลแล้ว แต่ไม่ถูกรางวัล (เจ้ามือกิน)
+      return res.json({
+        status: 'success',
+        data: {
+          status: 'lose', 
+          billId: billId,
+          customerName: targetBill.customerName
+        }
+      });
+    } else {
+      // กรณีที่ 3: หวยยังไม่ออก (รอตรวจผล)
+      return res.json({
+        status: 'success',
+        data: {
+          status: 'pending',
+          billId: billId,
+          customerName: targetBill.customerName
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Check Result Error:', error);
+    res.status(500).json({ status: 'error', message: 'Internal Server Error' });
+  }
+});
+
+// ==========================================
 // 🕒 สรุปยอดขายและกำไรประจำวัน (ตอน 23:59 น.)
 // ==========================================
 cron.schedule('59 23 * * *', async () => {
