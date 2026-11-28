@@ -161,7 +161,7 @@ app.post('/api/bills', checkAuth, async (req, res) => {
     
     const timeStr = Date.now().toString().slice(-3);
     const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const billIdNew = `BshortDate-{timeStr}${randomNum}`;
+    const billIdNew = `B${shortDate}-${timeStr}${randomNum}`;
 
     let totalPrice = 0;
     let validItems = [];
@@ -189,10 +189,10 @@ app.post('/api/bills', checkAuth, async (req, res) => {
     });
     await newBill.save();
 
-    let msg = `🧾 <b>โพยใหม่เข้าสู่ระบบ!</b>\n👤 ลูกค้า: ${customerNameNew}\n🏷️ รหัส: billIdNew({validItems.length} รายการ)\n💰 ยอดรวม: ${totalPrice.toLocaleString()} ฿\n🎁 ส่วนลด: ${(discountAmount || 0).toLocaleString()} ฿\n💵 ยอดสุทธิ: ${(netAmount || totalPrice).toLocaleString()} ฿\n`;
+    let msg = `🧾 <b>โพยใหม่เข้าสู่ระบบ!</b>\n👤 ลูกค้า: ${customerNameNew}\n🏷️ รหัส: ${billIdNew} (${validItems.length} รายการ)\n💰 ยอดรวม: ${totalPrice.toLocaleString()} ฿\n🎁 ส่วนลด: ${(discountAmount || 0).toLocaleString()} ฿\n💵 ยอดสุทธิ: ${(netAmount || totalPrice).toLocaleString()} ฿\n`;
     sendTelegramNotify(msg);
 
-    io.emit('data_updated', { message: `📥 มีโพยใหม่เข้า: customerNameNew({(netAmount || totalPrice).toLocaleString()} ฿)` });
+    io.emit('data_updated', { message: `📥 มีโพยใหม่เข้า: ${customerNameNew} (${(netAmount || totalPrice).toLocaleString()} ฿)` });
 
     res.json({ status: 'success', billId: billIdNew, timestamp: d });
   } catch (error) { res.status(500).json({ status: 'error', message: error.message }); }
@@ -339,12 +339,12 @@ app.get('/api/check-bill/:code', async (req, res) => {
                         
                         let match = dateKey.match(/(.+?) (.+?)/);
                         if (match) {
-                            winPeriod = `งวด match[2]({match[1]})`;
+                            winPeriod = `งวด ${match[2]} (${match[1]})`;
                         } else {
                             winPeriod = `งวด ${dateKey}`;
                         }
 
-                        winDetails.push(`- winItem.type[{winItem.number}]`);
+                        winDetails.push(`- ${winItem.type} [${winItem.number}]`);
                     }
                 });
             }
@@ -491,7 +491,7 @@ cron.schedule('59 23 * * *', async () => {
         const yyyy = today.getFullYear();
         const mm = String(today.getMonth() + 1).padStart(2, '0');
         const dd = String(today.getDate()).padStart(2, '0');
-        const dateString = `yyyy-{mm}-${dd}`;
+        const dateString = `${yyyy}-${mm}-${dd}`;
 
         const payoutObj = payoutDataRecord.value;
         for (let key in payoutObj) {
@@ -507,7 +507,7 @@ cron.schedule('59 23 * * *', async () => {
 
       let msg = `📊 <b>สรุปยอดประจำวัน!</b> 📊\n`;
       msg += `📅 วันที่: ${new Date().toLocaleDateString('th-TH')}\n`;
-      msg += `🧾 จำนวนบิล: billsToday.lengthบิล({totalItems} รายการ)\n`;
+      msg += `🧾 จำนวนบิล: ${billsToday.length} บิล (${totalItems} รายการ)\n`;
       msg += `━━━━━━━━━━━━━━\n`;
       msg += `📈 <b>ยอดขายรวม:</b> ${totalSales.toLocaleString()} ฿\n`;
       
@@ -612,6 +612,3 @@ setInterval(async () => {
     console.error("⏰ ปลุกตัวเองล้มเหลว:", error.message);
   }
 }, 14 * 60 * 1000);
-
-
-
